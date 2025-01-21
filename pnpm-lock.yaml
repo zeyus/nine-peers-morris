@@ -11,6 +11,9 @@ importers:
       peerjs:
         specifier: ^1.5.4
         version: 1.5.4
+      svelte-persisted-store:
+        specifier: ^0.12.0
+        version: 0.12.0(svelte@5.19.0)
     devDependencies:
       '@eslint/compat':
         specifier: ^1.2.5
@@ -1384,6 +1387,12 @@ packages:
       svelte:
         optional: true
 
+  svelte-persisted-store@0.12.0:
+    resolution: {integrity: sha512-BdBQr2SGSJ+rDWH8/aEV5GthBJDapVP0GP3fuUCA7TjYG5ctcB+O9Mj9ZC0+Jo1oJMfZUd1y9H68NFRR5MyIJA==}
+    engines: {node: '>=0.14'}
+    peerDependencies:
+      svelte: ^3.48.0 || ^4 || ^5
+
   svelte@5.19.0:
     resolution: {integrity: sha512-qvd2GvvYnJxS/MteQKFSMyq8cQrAAut28QZ39ySv9k3ggmhw4Au4Rfcsqva74i0xMys//OhbhVCNfXPrDzL/Bg==}
     engines: {node: '>=18'}
@@ -2671,6 +2680,10 @@ snapshots:
       postcss: 8.5.1
       postcss-scss: 4.0.9(postcss@8.5.1)
     optionalDependencies:
+      svelte: 5.19.0
+
+  svelte-persisted-store@0.12.0(svelte@5.19.0):
+    dependencies:
       svelte: 5.19.0
 
   svelte@5.19.0:
