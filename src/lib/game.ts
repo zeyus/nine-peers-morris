@@ -1,16 +1,44 @@
+import { Graph } from './graph';
+import { createHash } from 'crypto';
+import { type Hashable } from './hashable';
 
-interface Player {
+class Player implements Hashable {
+    id: string;
     name: string;
-    rolled: number;
-    score: number;
+    pieces: GamePiece[];
     isWinner: boolean;
+    constructor(id: string, name: string) {
+        this.id = id;
+        this.name = name;
+        this.pieces = [];
+        this.isWinner = false;
+    }
+    reset() {
+        this.pieces = [];
+        this.isWinner = false;
+    }
+    addPiece(piece: GamePiece) {
+        this.pieces.push(piece);
+    }
+
+    addPieces(pieces: GamePiece[]) {
+        this.pieces.push(...pieces);
+    }
+    dehydrate(): string {
+        return JSON.stringify({
+            id: this.id,
+            name: this.name,
+            pieces: this.pieces.map(piece => piece.dehydrate()),
+            isWinner: this.isWinner
+        });
+    }
 }
 
-class Cell {
+class Cell implements Hashable {
     id: number;
     row: number;
     col: number;
-    piece: Player | null;
+    piece: GamePiece | null;
 
     constructor(id: number, row: number, col: number) {
         this.id = id;
@@ -18,9 +46,18 @@ class Cell {
         this.col = col;
         this.piece = null;
     }
+
+    dehydrate(): string {
+        return JSON.stringify({
+            id: this.id,
+            row: this.row,
+            col: this.col,
+            piece: this.piece
+        });
+    }
 }
 
-class GamePiece {
+class GamePiece implements Hashable {
     player: Player;
     cell: Cell | null;
     state: 'unplaced' | 'placed' | 'removed';
@@ -30,31 +67,117 @@ class GamePiece {
         this.cell = cell;
         this.state = 'unplaced';
     }
+
+    dehydrate(): string {
+        return JSON.stringify({
+            player: this.player.id,
+            cell: this.cell !== null ? this.cell.id : null,
+            state: this.state
+        });
+    }
+    
 }
 
-class Board {
+type BoardOptions = {
+    cells?: number;
+    pieces?: number;
+    players?: Player[];
+    graph?: Graph<Cell>;
+    millCount?: number;
+}
+
+const defaultOptions: BoardOptions = {
+    cells: 24,
+    pieces: 18,
+    players: [],
+    millCount: 3
+}
+
+class Board implements Hashable {
+    nPlayers: number = 2;
     cellCount: number;
     pieceCount: number;
     state: Graph<Cell>;
+    millCount: number;
+    players: Player[];
 
-    constructor(cells: number, pieces: number, graph: Graph<Cell> | undefined = undefined) {
-        this.cellCount = cells;
-        this.pieceCount = pieces;
-        if (graph) {
-            this.state = graph;
+    constructor(boardOptions?: BoardOptions) {
+        const options = { ...defaultOptions, ...boardOptions };
+        if (options.players!.length !== this.nPlayers) {
+            throw new Error(`Invalid number of players, expected ${this.nPlayers}`);
+        }
+        if (options.pieces! % this.nPlayers !== 0) {
+            throw new Error('Invalid number of pieces, must be even');
+        }
+
+        this.players = options.players!;
+        this.millCount = options.millCount!;
+        this.cellCount = options.cells!;
+        this.pieceCount = options.pieces!;
+        this.players.forEach(player => {
+            player.reset();
+            player.addPieces(Array.from({ length: this.pieceCount / this.nPlayers }, (_, i) => new GamePiece(player)));
+        });
+
+        if (options.graph) {
+            this.state = options.graph;
         } else {
-            this.state = new Graph<Cell>(Array.from({ length: cells }, (_, i) => {
+            this.state = new Graph<Cell>(Array.from({ length: this.cellCount }, (_, i) => {
                 const row = Math.floor(i / 3);
                 const col = i % 3;
                 return new Cell(i, row, col);
             }));
         }
     }
+
+    getCell(id: number) {
+        return this.state.filter(cell => cell.id === id)[0];
+    }
+
+    getCellByRowCol(row: number, col: number) {
+        return this.state.filter(cell => cell.row === row && cell.col === col)[0];
+    }
+
+    checkForMill(cell: Cell) {
+        if (!cell.piece) {
+            return false;
+        }
+        const player = cell.piece.player;
+        const cellsWithPlayerPiece = this.state.contiguousBreathFirstSearch(cell, c => (c.piece !== null && c.piece.player === player && (c.row === cell.row || c.col === cell.col)));
+        if (cellsWithPlayerPiece.length < this.millCount) {
+            return false;
+        }
+        // now check if there are three in a row
+        // i.e. there are three cells in a row or column
+        const rowCells = cellsWithPlayerPiece.filter(c => c.row === cell.row);
+        const colCells = cellsWithPlayerPiece.filter(c => c.col === cell.col);
+
+        return rowCells.length >= this.millCount || colCells.length >= this.millCount;        
+    }
+
+    placePiece(piece: GamePiece, cell: Cell) {
+        if (cell.piece) {
+            throw new Error('Cell already occupied');
+        }
+        piece.cell = cell;
+        cell.piece = piece;
+        piece.state = 'placed';
+    }
+
+    dehydrate(): string {
+        return JSON.stringify({
+            players: this.players.map(player => player.dehydrate()),
+            state: this.state.dehydrate(),
+            millCount: this.millCount,
+            pieceCount: this.pieceCount,
+            cellCount: this.cellCount
+        });
+    }
 }
 
 
 class NineBoard extends Board {
-    constructor() {
+    constructor(players: Player[]) {
         const graph = new Graph<Cell>(Array.from({ length: 24 }, (_, i) => {
             if (i < 12) {
                 const row = Math.floor(i / 3);
@@ -105,90 +228,99 @@ class NineBoard extends Board {
         graph.addEdgesByFilter(cell => cell.id === 21, cell => (cell.id === 22));
         graph.addEdgesByFilter(cell => cell.id === 22, cell => (cell.id === 23));
 
-        super(24, 18, graph);
-    }
-
-    cellFilter(row: number, col: number) {
-        return (cell: Cell) => cell.row === row && cell.col === col;
-    }
-}
-
-
-interface GameState {
-    board: Board;
-    currentPlayer: Player;
-    winner: Player | null;
-}
-
-interface Game {
-    players: Player[];
-    board: Board;
-    currentPlayer: Player;
-    winner: Player | null;
-}
-
-
-class Graph<T> {
-    adjList: Map<T, T[]>;
-
-    constructor(vertices: T[]) {
-        this.adjList = new Map<T, T[]>();
-
-        for (let v of vertices) {
-            this.addVertice(v);
-        }
-    }
-
-    addVertice(v: T) {
-        this.adjList.set(v, []);
-    }
-
-    addEdge(v: T, w: T) {
-        let ve = this.adjList.get(v);
-        let we = this.adjList.get(w);
-        if (ve && we) {
-            if (!ve.includes(w)) ve.push(w);
-            if (!we.includes(v)) we.push(v);
-        } else {
-            throw new Error('Invalid vertices');
-        }
-    }
-
-
-    filter(func: (v: T) => boolean): T[] {
-        return Array.from(this.adjList.keys()).filter(func);
-    }
-
-    addEdgesByFilter(src: (v: T) => boolean, dst: (w: T) => boolean) {
-        let srcV: T[] = this.filter(src);
-        if (srcV.length !== 1) {
-            throw new Error('Invalid source vertices, must match exactly one');
-        }
-        let dstV: T[] = this.filter(dst);
-        if (dstV.length < 1) {
-            throw new Error('Invalid destination vertices, must match at least one');
-        }
-
-        for (let v of srcV) {
-            for (let w of dstV) {
-                this.addEdge(v, w);
-            }
-        }
+        const options: BoardOptions = {
+            cells: 24,
+            pieces: 18,
+            players: players,
+            graph: graph,
+            millCount: 3
+        };
+        super(options);
     }
 }
 
 
-class NinePeersMorris implements Game {
-    players: Player[];
-    board: Board;
-    currentPlayer: Player;
-    winner: Player | null;
+abstract class Game implements Hashable {
+    protected players: Player[];
+    protected board: Board;
+    protected currentPlayer: Player;
+    protected winner: Player | null;
+    protected gameStateHash: GameStateHash;
 
-    constructor(players: Player[], board: Board) {
-        this.players = players;
+    constructor(me: Player, them: Player, board: Board) {
+        if (me === them) {
+            throw new Error('Players must be different');
+        }
+        this.players = [me, them];
         this.board = board;
-        this.currentPlayer = players[0];
+        this.currentPlayer = this.players[0]; // let's always start with the first player, later we can randomize
         this.winner = null;
+        this.gameStateHash = {};
     }
+
+    abstract dehydrate(): string;
+
+}
+
+// for checking after turns that
+// the peer is not trying to cheat.
+// sending a move will be replicated
+// on the recieving peer, validated
+// and then the state hash for the previous
+// and new turn will be additionally validated
+type GameStateHash = {
+    [key: number]: string;
+}
+
+interface Subscribable {
+    subscribe(fn: Function): void;
+}
+
+class SubscribableNum extends Number implements Subscribable {
+    private subscribers: Function[] = [];
+
+    constructor(value: number) {
+        super(value);
+    }
+
+    subscribe(fn: Function) {
+        this.subscribers.push(fn);
+    }
+
+    set value(value: number) {
+        this.valueOf = () => value;
+        this.subscribers.forEach(fn => fn(value));
+    }
+}
+
+
+class NinePeersMorris extends Game {
+    protected turn: Subscribable;
+
+    constructor(me: Player, them: Player) {
+        super(me, them, new NineBoard([me, them]));
+        this.turn = new SubscribableNum(0);
+        this.onTurnChange(0);
+        this.turn.subscribe(this.onTurnChange.bind(this));
+    }
+
+    dehydrate(): string {
+        return JSON.stringify({
+            players: [],
+            currentPlayer: this.currentPlayer,
+            winner: this.winner,
+            turn: this.turn.valueOf()
+        });
+    }
+
+    private onTurnChange(newTurn: number) {
+        const hash = this.getStateHash();
+        this.gameStateHash[newTurn] = hash;
+    }
+
+    getStateHash(): string {
+        return createHash('sha256').update(this.dehydrate()).digest('hex');
+    }
+
 
 }

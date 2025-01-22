@@ -1,0 +1,125 @@
+import { type Hashable } from './hashable';
+
+// generic graph implementation
+
+export class Graph<T> implements Hashable {
+    adjList: Map<T, T[]>;
+
+    constructor(vertices: T[]) {
+        this.adjList = new Map<T, T[]>();
+
+        for (let v of vertices) {
+            this.addVertice(v);
+        }
+    }
+
+    addVertice(v: T) {
+        this.adjList.set(v, []);
+    }
+
+    addEdge(v: T, w: T) {
+        let ve = this.adjList.get(v);
+        let we = this.adjList.get(w);
+        if (ve && we) {
+            if (!ve.includes(w)) ve.push(w);
+            if (!we.includes(v)) we.push(v);
+        } else {
+            throw new Error('Invalid vertices');
+        }
+    }
+
+    neighbors(v: T): T[] {
+        let ve = this.adjList.get(v);
+        if (ve) {
+            return ve;
+        } else {
+            throw new Error('Invalid vertex');
+        }
+    }
+
+    breadthFirstSearch(start: T, func: (v: T) => boolean): T[] {
+        let visited: Set<T> = new Set<T>();
+        let queue: T[] = [start];
+        let result: T[] = [];
+
+        while (queue.length > 0) {
+            let v = queue.shift();
+            if (v && !visited.has(v)) {
+                visited.add(v);
+                if (func(v)) {
+                    result.push(v);
+                }
+                queue.push(...this.neighbors(v).filter(w => !visited.has(w)));
+            }
+        }
+
+        return result;
+    }
+
+    contiguousBreathFirstSearch(start: T, func: (v: T) => boolean, excludeStart: boolean = true): T[] {
+        /**
+         * This is a modified version of the breadthFirstSearch function that
+         * returns all contiguous vertices that match the condition.
+         * 
+         * @param start The starting vertex
+         * @param func The condition to match
+         * @param excludeStart Whether to exclude the starting vertex from being tested
+         *
+         * @returns An array of vertices that match the condition, including the starting vertex /if/ it matches
+         */
+        let visited: Set<T> = new Set<T>();
+        let queue: T[] = [start];
+        let result: T[] = [];
+
+        while (queue.length > 0) {
+            let v = queue.shift();
+            if (v && !visited.has(v)) {
+                visited.add(v);
+                if (func(v)) {
+                    result.push(v);
+                    queue.push(...this.neighbors(v).filter(w => !visited.has(w)));
+                } else if (excludeStart && v === start) {
+                    queue.push(...this.neighbors(v).filter(w => !visited.has(w)));
+                }
+            }
+        }
+
+        return result
+    }
+    
+
+
+    filter(func: (v: T) => boolean): T[] {
+        return Array.from(this.adjList.keys()).filter(func);
+    }
+
+    addEdgesByFilter(src: (v: T) => boolean, dst: (w: T) => boolean) {
+        let srcV: T[] = this.filter(src);
+        if (srcV.length !== 1) {
+            throw new Error('Invalid source vertices, must match exactly one');
+        }
+        let dstV: T[] = this.filter(dst);
+        if (dstV.length < 1) {
+            throw new Error('Invalid destination vertices, must match at least one');
+        }
+
+        for (let v of srcV) {
+            for (let w of dstV) {
+                this.addEdge(v, w);
+            }
+        }
+    }
+
+    dehydrate(): string {
+        return JSON.stringify(Array.from(
+            this.adjList.keys().map(v => {
+                return {
+                    vertex: v !== null && typeof v === "object" && 'dehydrate' in v && typeof v.dehydrate === 'function' ? v.dehydrate() : v,
+                    neighbors: this.adjList.get(v)?.map(
+                        w => w !== null && typeof w === "object" && 'dehydrate' in w && typeof w.dehydrate === 'function' ? w.dehydrate() : w
+                    )
+                };
+            }
+        )));
+    }
+}
