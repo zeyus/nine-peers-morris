@@ -122,4 +122,22 @@ export class Graph<T> implements Hashable {
             }
         )));
     }
+    
+
+    // this is gimmicky, so it's not a core part of the code
+    // but it's interesting to see what a graph representation
+    // of a nine men's morris board looks like
+    // asDot(): string {
+    //     let dot = 'graph {\n';
+    //     for (let [v, neighbors] of this.adjList) {
+    //         const v_repr = v !== null && typeof v === "object" && 'id' in v && v.id !== null && typeof v.id === "object" ? v.id.toString() : v;
+    //         for (let w of neighbors) {
+    //             const w_repr = w !== null && typeof w === "object" && 'id' in w && w.id !== null && typeof w.id === "object" ? w.id.toString() : w;
+    //             dot += `  ${v_repr} -- ${w_repr};\n`;
+    //         }
+    //     }
+    //     dot += '}';
+    //     return dot;
+    // }
+
 }

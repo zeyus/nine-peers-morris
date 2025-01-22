@@ -2,7 +2,7 @@ import { Graph } from './graph';
 import { createHash } from 'crypto';
 import { type Hashable } from './hashable';
 
-class Player implements Hashable {
+export class Player implements Hashable {
     id: string;
     name: string;
     pieces: GamePiece[];
@@ -34,7 +34,7 @@ class Player implements Hashable {
     }
 }
 
-class Cell implements Hashable {
+export class Cell implements Hashable {
     id: number;
     row: number;
     col: number;
@@ -57,7 +57,7 @@ class Cell implements Hashable {
     }
 }
 
-class GamePiece implements Hashable {
+export class GamePiece implements Hashable {
     player: Player;
     cell: Cell | null;
     state: 'unplaced' | 'placed' | 'removed';
@@ -78,7 +78,7 @@ class GamePiece implements Hashable {
     
 }
 
-type BoardOptions = {
+export type BoardOptions = {
     cells?: number;
     pieces?: number;
     players?: Player[];
@@ -86,14 +86,14 @@ type BoardOptions = {
     millCount?: number;
 }
 
-const defaultOptions: BoardOptions = {
+export const defaultOptions: BoardOptions = {
     cells: 24,
     pieces: 18,
     players: [],
     millCount: 3
 }
 
-class Board implements Hashable {
+export class Board implements Hashable {
     nPlayers: number = 2;
     cellCount: number;
     pieceCount: number;
@@ -176,7 +176,7 @@ class Board implements Hashable {
 }
 
 
-class NineBoard extends Board {
+export class NineBoard extends Board {
     constructor(players: Player[]) {
         const graph = new Graph<Cell>(Array.from({ length: 24 }, (_, i) => {
             if (i < 12) {
@@ -240,7 +240,7 @@ class NineBoard extends Board {
 }
 
 
-abstract class Game implements Hashable {
+export abstract class Game implements Hashable {
     protected players: Player[];
     protected board: Board;
     protected currentPlayer: Player;
@@ -268,15 +268,15 @@ abstract class Game implements Hashable {
 // on the recieving peer, validated
 // and then the state hash for the previous
 // and new turn will be additionally validated
-type GameStateHash = {
+export type GameStateHash = {
     [key: number]: string;
 }
 
-interface Subscribable {
+export interface Subscribable {
     subscribe(fn: Function): void;
 }
 
-class SubscribableNum extends Number implements Subscribable {
+export class SubscribableNum extends Number implements Subscribable {
     private subscribers: Function[] = [];
 
     constructor(value: number) {
@@ -294,7 +294,7 @@ class SubscribableNum extends Number implements Subscribable {
 }
 
 
-class NinePeersMorris extends Game {
+export class NinePeersMorris extends Game {
     protected turn: Subscribable;
 
     constructor(me: Player, them: Player) {
