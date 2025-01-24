@@ -1,17 +1,21 @@
 import { Graph } from './graph';
-import { createHash } from 'crypto';
-import { type Hashable } from './hashable';
+import { type Hashable, getHash } from './hashable';
 
 export class Player implements Hashable {
-    id: string;
-    name: string;
-    pieces: GamePiece[];
-    isWinner: boolean;
-    constructor(id: string, name: string) {
+    readonly id: string;
+    readonly name: string;
+    protected pieces: GamePiece[];
+    protected removedPieces: GamePiece[];
+    readonly isInitiator: boolean;
+    protected isWinner: boolean;
+
+    constructor(id: string, name: string, isInitiator: boolean) {
         this.id = id;
         this.name = name;
         this.pieces = [];
         this.isWinner = false;
+        this.removedPieces = [];
+        this.isInitiator = isInitiator;
     }
     reset() {
         this.pieces = [];
@@ -23,6 +27,13 @@ export class Player implements Hashable {
 
     addPieces(pieces: GamePiece[]) {
         this.pieces.push(...pieces);
+    }
+    removePiece(piece: GamePiece) {
+        this.pieces = this.pieces.filter(p => p !== piece);
+        this.removedPieces.push(piece);
+    }
+    get pieceCount(): number {
+        return this.pieces.length;
     }
     dehydrate(): string {
         return JSON.stringify({
@@ -47,6 +58,20 @@ export class Cell implements Hashable {
         this.piece = null;
     }
 
+    occupy(piece: GamePiece) {
+        if (this.piece) {
+            throw new Error('Cell already occupied');
+        }
+        this.piece = piece;
+    }
+
+    vacate() {
+        if (!this.piece) {
+            throw new Error('Cell already vacant');
+        }
+        this.piece = null;
+    }
+
     dehydrate(): string {
         return JSON.stringify({
             id: this.id,
@@ -59,13 +84,38 @@ export class Cell implements Hashable {
 
 export class GamePiece implements Hashable {
     player: Player;
+    id: string;
     cell: Cell | null;
     state: 'unplaced' | 'placed' | 'removed';
 
-    constructor(player: Player, cell: Cell | null = null) {
+    constructor(player: Player, id: string) {
+        this.id = id;
         this.player = player;
-        this.cell = cell;
+        this.cell = null;
         this.state = 'unplaced';
+    }
+
+    place(cell: Cell) {
+        if (this.state !== 'unplaced') {
+            throw new Error('Piece not available to place');
+        }
+        this.cell = cell;
+        this.state = 'placed';
+    }
+
+    remove() {
+        if (this.state !== 'placed') {
+            throw new Error('Piece not available to remove');
+        }
+        this.cell = null;
+        this.state = 'removed';
+    }
+
+    move(cell: Cell) {
+        if (this.state !== 'placed') {
+            throw new Error('Piece not available to move');
+        }
+        this.cell = cell;
     }
 
     dehydrate(): string {
@@ -84,13 +134,17 @@ export type BoardOptions = {
     players?: Player[];
     graph?: Graph<Cell>;
     millCount?: number;
+    fly?: boolean;
+    flyAt?: number;
 }
 
 export const defaultOptions: BoardOptions = {
     cells: 24,
     pieces: 18,
     players: [],
-    millCount: 3
+    millCount: 3,
+    fly: false,
+    flyAt: 0
 }
 
 export class Board implements Hashable {
@@ -100,6 +154,8 @@ export class Board implements Hashable {
     state: Graph<Cell>;
     millCount: number;
     players: Player[];
+    fly: boolean;
+    flyAt: number;
 
     constructor(boardOptions?: BoardOptions) {
         const options = { ...defaultOptions, ...boardOptions };
@@ -116,8 +172,10 @@ export class Board implements Hashable {
         this.pieceCount = options.pieces!;
         this.players.forEach(player => {
             player.reset();
-            player.addPieces(Array.from({ length: this.pieceCount / this.nPlayers }, (_, i) => new GamePiece(player)));
+            player.addPieces(Array.from({ length: this.pieceCount / this.nPlayers }, (_, i) => new GamePiece(player, i.toString())));
         });
+        this.fly = options.fly!;
+        this.flyAt = options.flyAt!;
 
         if (options.graph) {
             this.state = options.graph;
@@ -156,12 +214,38 @@ export class Board implements Hashable {
     }
 
     placePiece(piece: GamePiece, cell: Cell) {
-        if (cell.piece) {
-            throw new Error('Cell already occupied');
+        cell.occupy(piece);
+        piece.place(cell);
+    }
+
+    movePiece(piece: GamePiece, cell: Cell) {
+        if (!this.state.isAdjacent(piece.cell!, cell)) {
+            throw new Error('Invalid move, cells not adjacent');
         }
-        piece.cell = cell;
-        cell.piece = piece;
-        piece.state = 'placed';
+        piece.cell!.vacate();
+        cell.occupy(piece);
+        piece.move(cell);
+    }
+
+    // this is only for variations where when a player
+    // has < n pieces, they can move any piece
+    flyPiece(piece: GamePiece, cell: Cell) {
+        if (!this.fly) {
+            throw new Error('Invalid move, flying not allowed');
+        }
+        if (piece.player.pieceCount >= this.flyAt) {
+            throw new Error('Invalid move, player has enough pieces to fly');
+        }
+
+        piece.cell!.vacate();
+        cell.occupy(piece);
+        piece.move(cell);
+    }
+
+    removePiece(piece: GamePiece) {
+        piece.cell!.vacate();
+        piece.remove();
+        piece.player.removePiece(piece);
     }
 
     dehydrate(): string {
@@ -251,7 +335,8 @@ export abstract class Game implements Hashable {
         if (me === them) {
             throw new Error('Players must be different');
         }
-        this.players = [me, them];
+        // initiator first to simplify dehydrating and hashing...for now
+        this.players = me.isInitiator ? [me, them] : [them, me];
         this.board = board;
         this.currentPlayer = this.players[0]; // let's always start with the first player, later we can randomize
         this.winner = null;
@@ -273,17 +358,17 @@ export type GameStateHash = {
 }
 
 export interface Subscribable {
-    subscribe(fn: Function): void;
+    subscribe(fn: (value: number) => void): void;
 }
 
 export class SubscribableNum extends Number implements Subscribable {
-    private subscribers: Function[] = [];
+    private subscribers: ((value: number) => void)[] = [];
 
     constructor(value: number) {
         super(value);
     }
 
-    subscribe(fn: Function) {
+    subscribe(fn: (value: number) => void) {
         this.subscribers.push(fn);
     }
 
@@ -296,17 +381,21 @@ export class SubscribableNum extends Number implements Subscribable {
 
 export class NinePeersMorris extends Game {
     protected turn: Subscribable;
+    private win: Window;
+    private ready: boolean;
 
-    constructor(me: Player, them: Player) {
+    constructor(win: Window, me: Player, them: Player) {
         super(me, them, new NineBoard([me, them]));
+        this.win = win;
         this.turn = new SubscribableNum(0);
+        this.ready = true;
         this.onTurnChange(0);
         this.turn.subscribe(this.onTurnChange.bind(this));
     }
 
     dehydrate(): string {
         return JSON.stringify({
-            players: [],
+            players: [this.players[0].dehydrate(), this.players[1].dehydrate()],
             currentPlayer: this.currentPlayer,
             winner: this.winner,
             turn: this.turn.valueOf()
@@ -314,13 +403,17 @@ export class NinePeersMorris extends Game {
     }
 
     private onTurnChange(newTurn: number) {
-        const hash = this.getStateHash();
-        this.gameStateHash[newTurn] = hash;
+        if (!this.ready) {
+            throw new Error('Game not ready');
+        }
+        this.ready = false;
+        this.getStateHash().then(hash => {
+            this.gameStateHash[newTurn] = hash;
+            this.ready = true;
+        });
     }
 
-    getStateHash(): string {
-        return createHash('sha256').update(this.dehydrate()).digest('hex');
+    async getStateHash(): Promise<string> {
+        return getHash(this.win, this.dehydrate());
     }
-
-
 }

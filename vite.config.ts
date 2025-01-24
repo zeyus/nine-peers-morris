@@ -7,5 +7,11 @@ export default defineConfig({
 	? {
 			conditions: ['browser']
 		}
-	: undefined
+	: undefined,
+	ssr: {
+		optimizeDeps: {
+			include: ['peerjs']
+		},
+		noExternal: ['peerjs']
+	}
 });

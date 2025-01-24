@@ -1,5 +1,5 @@
 <script lang="ts">
-    import Peer from '../components/peer.svelte';
+    import Lobby from '../components/lobby.svelte';
 </script>
 <h1>Page</h1>
-<Peer />
+<Lobby />

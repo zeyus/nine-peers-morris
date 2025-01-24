@@ -8,7 +8,7 @@ export class Graph<T> implements Hashable {
     constructor(vertices: T[]) {
         this.adjList = new Map<T, T[]>();
 
-        for (let v of vertices) {
+        for (const v of vertices) {
             this.addVertice(v);
         }
     }
@@ -18,8 +18,8 @@ export class Graph<T> implements Hashable {
     }
 
     addEdge(v: T, w: T) {
-        let ve = this.adjList.get(v);
-        let we = this.adjList.get(w);
+        const ve = this.adjList.get(v);
+        const we = this.adjList.get(w);
         if (ve && we) {
             if (!ve.includes(w)) ve.push(w);
             if (!we.includes(v)) we.push(v);
@@ -29,7 +29,7 @@ export class Graph<T> implements Hashable {
     }
 
     neighbors(v: T): T[] {
-        let ve = this.adjList.get(v);
+        const ve = this.adjList.get(v);
         if (ve) {
             return ve;
         } else {
@@ -38,12 +38,12 @@ export class Graph<T> implements Hashable {
     }
 
     breadthFirstSearch(start: T, func: (v: T) => boolean): T[] {
-        let visited: Set<T> = new Set<T>();
-        let queue: T[] = [start];
-        let result: T[] = [];
+        const visited: Set<T> = new Set<T>();
+        const queue: T[] = [start];
+        const result: T[] = [];
 
         while (queue.length > 0) {
-            let v = queue.shift();
+            const v = queue.shift();
             if (v && !visited.has(v)) {
                 visited.add(v);
                 if (func(v)) {
@@ -67,12 +67,12 @@ export class Graph<T> implements Hashable {
          *
          * @returns An array of vertices that match the condition, including the starting vertex /if/ it matches
          */
-        let visited: Set<T> = new Set<T>();
-        let queue: T[] = [start];
-        let result: T[] = [];
+        const visited: Set<T> = new Set<T>();
+        const queue: T[] = [start];
+        const result: T[] = [];
 
         while (queue.length > 0) {
-            let v = queue.shift();
+            const v = queue.shift();
             if (v && !visited.has(v)) {
                 visited.add(v);
                 if (func(v)) {
@@ -87,24 +87,30 @@ export class Graph<T> implements Hashable {
         return result
     }
     
+    isAdjacent(v: T, w: T): boolean {
+        return this.neighbors(v).includes(w);
+    }
 
+    isMutuallyAdjacent(v: T, w: T): boolean {
+        return this.isAdjacent(v, w) && this.isAdjacent(w, v);
+    }
 
     filter(func: (v: T) => boolean): T[] {
         return Array.from(this.adjList.keys()).filter(func);
     }
 
     addEdgesByFilter(src: (v: T) => boolean, dst: (w: T) => boolean) {
-        let srcV: T[] = this.filter(src);
+        const srcV: T[] = this.filter(src);
         if (srcV.length !== 1) {
             throw new Error('Invalid source vertices, must match exactly one');
         }
-        let dstV: T[] = this.filter(dst);
+        const dstV: T[] = this.filter(dst);
         if (dstV.length < 1) {
             throw new Error('Invalid destination vertices, must match at least one');
         }
 
-        for (let v of srcV) {
-            for (let w of dstV) {
+        for (const v of srcV) {
+            for (const w of dstV) {
                 this.addEdge(v, w);
             }
         }

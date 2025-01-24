@@ -1,5 +1,7 @@
-import { persisted } from 'svelte-persisted-store';
+import { persisted, type Persisted } from 'svelte-persisted-store';
 
-export const peerConfig = persisted('peerConfig', {
-    pId: crypto.randomUUID().toString(),
+export const peerConfig: Persisted<{
+    pId: string | null;
+}> = persisted('peerConfig', {
+    pId: null,
 });
