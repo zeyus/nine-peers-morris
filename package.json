@@ -45,7 +45,6 @@
 	"dependencies": {
 		"@msgpack/msgpack": "3.0.0-beta2",
 		"eventemitter3": "^5.0.1",
-		"peerjs": "^1.5.4",
 		"peerjs-js-binarypack": "^2.1.0",
 		"svelte-persisted-store": "^0.12.0",
 		"webrtc-adapter": "^9.0.1"
