@@ -13,7 +13,6 @@
     let supported: boolean | null = $state(null);
     let them: string | null = $state(null);
     let dataConnection: DataConnection | null = $state(null);
-    let defaultModal = false;
 
     onMount(() => {
         if (!util.supports.data) {
