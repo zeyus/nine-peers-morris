@@ -118,7 +118,7 @@ export class Graph<T> implements Hashable {
 
     dehydrate(): string {
         return JSON.stringify(Array.from(
-            this.adjList.keys().map(v => {
+            this.adjList.keys()).map(v => {
                 return {
                     vertex: v !== null && typeof v === "object" && 'dehydrate' in v && typeof v.dehydrate === 'function' ? v.dehydrate() : v,
                     neighbors: this.adjList.get(v)?.map(
@@ -126,7 +126,7 @@ export class Graph<T> implements Hashable {
                     )
                 };
             }
-        )));
+        ));
     }
     
 
