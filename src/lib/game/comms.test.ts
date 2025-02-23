@@ -1,10 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { PeerBroker, type PeerMessage } from './comms';
 import { peerConfig, type PersistedPeerConfig } from '$lib/persisted-store';
-import { util } from "$lib/peerjs/util";
-import { Peer } from "$lib/peerjs/peer";
-import { DataConnection } from "$lib/peerjs/dataconnection/DataConnection";
-import { getUUID } from '$lib/game/hashable';
 import { getHash } from "$lib/game/hashable";
 
 const crypto = {
@@ -17,6 +13,11 @@ const crypto = {
 if (!globalThis.crypto) {
     /** @ts-expect-error mock */
     globalThis.crypto = crypto;
+}
+
+if (!globalThis.window) {
+    /** @ts-expect-error mock */
+    globalThis.window = {};
 }
 
 if (!globalThis.window.crypto) {
@@ -40,9 +41,12 @@ describe('PeerBroker', () => {
 
     beforeEach(() => {
         win = window;
+        /** @ts-expect-error this is a mock implementation */
         conf = { pId: 'test-id' };
         peerConfig.set = vi.fn();
+        /**  @ts-expect-error this is a mock implementation */
         peerConfig.get = vi.fn().mockReturnValue({ pId: 'test-id' });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         peerConfig.subscribe = vi.fn((cb: (v: any) => void) => { cb(conf); return vi.fn() });
     });
 
@@ -63,9 +67,11 @@ describe('PeerBroker', () => {
         const data = {
             command: 'PLAY',
             stateHash: 'somehash',
+            newStateHash: 'newhash',
             data: 'somedata'
         } as PeerMessage;
         const preparedData = await broker['_packagePeerMessage'](data);
+        expect(preparedData).not.toBeNull();
         const message = await broker['_dataToPeerMessage'](preparedData, 'peer-id');
         expect(message).not.toBeNull();
         expect(message?.command).toBe('PLAY');
@@ -73,6 +79,8 @@ describe('PeerBroker', () => {
 
     it('should handle invalid data type', async () => {
         const broker = new PeerBroker(win, conf);
+        
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await expect(broker['_dataToPeerMessage'](123 as any, 'peer-id')).rejects.toThrow('Invalid data type');
     });
 

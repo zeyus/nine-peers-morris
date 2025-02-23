@@ -9,13 +9,13 @@
     import { peerConfig } from '$lib/persisted-store';
     import { Spinner, Modal, Button, ButtonGroup } from 'flowbite-svelte';
     import PeerList from '../components/peer-list.svelte';
-    import { PeerCommands, GameHost, GameClient, PeerData, PeerRole, type PeerStatus } from "$lib/game/comms";
+    import { PeerCommands, GameHost, GameClient, PeerData, PeerRole, type PeerState } from "$lib/game/comms";
 
     let p: Peer | null = $state(null);
     let supported: boolean | null = $state(null);
     let them: string | null = $state(null);
     let dataConnection: DataConnection | null = $state(null);
-    let role: PeerStatus | null = $state(null);
+    let role: PeerState | null = $state(null);
     let metadata: any = $state(null);
 
     onMount(() => {
@@ -88,9 +88,9 @@
                 if (role?.role === PeerRole.Host) {
                     if (msg.command === PeerCommands.Elho) {
                         role.messageFromCommand(PeerCommands.PlayWithMe).then((msg) => dataConnection!.send(msg));
-                    } else if (msg.command === PeerCommands.IWillPlayWithYou) {
+                    } else if (msg.command === PeerCommands.LetsPlay) {
                         console.log('accepted by', dataConnection!.metadata.clientName);
-                    } else if (msg.command === PeerCommands.IWontPlayWithYou) {
+                    } else if (msg.command === PeerCommands.NoThanks) {
                         console.log('rejected');
                     }
                 }
@@ -113,12 +113,12 @@
             <ButtonGroup>
                 <Button color="green" onclick={() => {
                     console.log('accepting');
-                    role!.messageFromCommand(PeerCommands.IWillPlayWithYou).then((msg) => dataConnection!.send(msg));
+                    role!.messageFromCommand(PeerCommands.LetsPlay).then((msg) => dataConnection!.send(msg));
                     modalVisible = false;
                 }}>Accept</Button>
                 <Button color="red" onclick={() => {
                     console.log('rejecting');
-                    role!.messageFromCommand(PeerCommands.IWontPlayWithYou).then((msg) => dataConnection!.send(msg));
+                    role!.messageFromCommand(PeerCommands.NoThanks).then((msg) => dataConnection!.send(msg));
                     modalVisible = false;
                 }}>Reject</Button>
             </ButtonGroup>
