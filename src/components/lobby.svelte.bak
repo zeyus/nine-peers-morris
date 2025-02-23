@@ -1,0 +1,33 @@
+<script lang="ts">
+    import { Peer } from "$lib/peerjs/peer";
+    import { type DataConnection } from "$lib/peerjs/dataconnection/DataConnection";
+    import { util } from "$lib/peerjs/util";
+    import { getUUID } from '$lib/game/hashable';
+    import { onMount } from 'svelte';
+    import { peerServerConf } from '$lib/peer-config';
+    import { peerConfig } from '$lib/persisted-store';
+    import { Spinner, Modal } from 'flowbite-svelte';
+    i./peer-list.svelteents/peer-list.svelte';
+
+
+    onMount(() => {
+        
+
+        
+    });
+
+    const onConnectRequest = (pId: string) => {
+        
+    };
+</script>
+{#if p && $peerConfig.pId}
+    <h1>Peer ID: {$peerConfig.pId}</h1>
+    <h2>Peers</h2>
+    <PeerList pId={$peerConfig.pId} {onConnectRequest} />
+{:else}
+    {#if supported === false}
+        <p>Sorry, your browser does not support WebRTC</p>
+    {:else}
+        <Spinner />
+    {/if}
+{/if}
