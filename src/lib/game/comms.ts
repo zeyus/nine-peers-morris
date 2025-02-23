@@ -1,12 +1,20 @@
+import { Peer } from "$lib/peerjs/peer";
+import { type DataConnection } from "$lib/peerjs/dataconnection/DataConnection";
+import { util } from "$lib/peerjs/util";
+import { peerServerConf } from '$lib/peer-config';
+import { get } from 'svelte/store';
+import { peerConfig, type PersistedPeerConfig } from '$lib/persisted-store';
 import { Player, NinePeersMorris, Game } from "./game";
-import { getHash } from "./hashable";
+import { getHash, getUUID } from "./hashable";
 
 export const enum PeerCommands {
     Helo = 'HELO',
     Elho = 'EHLO',
     PlayWithMe = 'PLAY_WITH_ME',
-    IWillPlayWithYou = 'I_WILL_PLAY_WITH_YOU',
-    IWontPlayWithYou = 'I_WONT_PLAY_WITH_YOU',
+    LetsPlay = 'LETS_PLAY',
+    Roll = 'ROLL',
+    RollResult = 'ROLL_RESULT',
+    NoThanks = 'NO_THANKS',
     PeerBlocked = 'PEER_BLOCKED',
     Play = 'PLAY',
     YourTurn = 'YOUR_TURN',
@@ -31,7 +39,7 @@ export type PeerMessage = {
 
 export type PeerMessageHandler = (msg: PeerMessage) => void;
 
-export const enum PeerState {
+export const enum PeerStatus {
     Connecting,
     Accepted,
     Rejected,
@@ -59,10 +67,10 @@ export class PeerData {
     }
 }
 
-export abstract class PeerStatus {
+export abstract class PeerState {
     me: string;
     them: string;
-    state: PeerState;
+    state: PeerStatus;
     role: PeerRole = PeerRole.Host;
     lastStateHash: string | null = null;
     protected game: Game | null = null;
@@ -70,7 +78,7 @@ export abstract class PeerStatus {
     constructor(me: string, them: string) {
         this.me = me;
         this.them = them;
-        this.state = PeerState.Connecting;
+        this.state = PeerStatus.Connecting;
     }
 
     getHost(): string {
@@ -87,15 +95,15 @@ export abstract class PeerStatus {
         }
         this.lastStateHash = msg.stateHash;
         if (msg.command === PeerCommands.Play) {
-            if (this.state === PeerState.Connecting) {
+            if (this.state === PeerStatus.Connecting) {
                 //
             }
         } else if (msg.command === PeerCommands.YourTurn) {
-            if (this.state === PeerState.Playing) {
+            if (this.state === PeerStatus.Playing) {
                 // 
             }
         } else if (msg.command === PeerCommands.GameOver) {
-            if (this.state === PeerState.Playing) {
+            if (this.state === PeerStatus.Playing) {
                 //
             }
         }
@@ -131,7 +139,7 @@ export abstract class PeerStatus {
     }
 }
 
-export class GameHost extends PeerStatus {
+export class GameHost extends PeerState {
     constructor(me: string, them: string) {
         super(me, them);
     }
@@ -143,7 +151,7 @@ export class GameHost extends PeerStatus {
     }
 }
 
-export class GameClient extends PeerStatus {
+export class GameClient extends PeerState {
     constructor(me: string, them: string) {
         super(me, them);
         this.role = PeerRole.Client;
@@ -153,5 +161,95 @@ export class GameClient extends PeerStatus {
         const me = new Player(this.me, 'O', false);
         const them = new Player(this.them, 'X', true);
         this.game = new NinePeersMorris(win, me, them);
+    }
+}
+
+
+// wip: handle all the peerjs stuff here
+// rather than having this logic in the components
+export class PeerBroker {
+    private peer: Peer;
+    private win: Window;
+    id: string;
+    conf: PersistedPeerConfig;
+    channel: DataConnection | null = null;
+    them: string | null = null;
+    state: PeerState | null = null;
+
+    constructor(win: Window, conf: PersistedPeerConfig) {
+        if (!util.supports.data) {
+            //throw new Error('DataChannel not supported');
+        } 
+        this.win = win;
+        this.conf = conf;
+        const currentId = get(peerConfig).pId;
+        if (currentId) {
+            this.id = currentId;
+        } else {
+            this.id = getUUID(this.win);
+            peerConfig.set({ pId: this.id });
+        }
+        this.peer = new Peer(this.id, peerServerConf);
+        this.peer.on('connection', (conn) => {
+            this.channel = conn;
+            this.them = conn.peer;
+            this.channel.on('data', (data) =>{
+                console.log(data);
+            });
+        });
+        this.peer.on('error', (err) => {
+            console.error(err);
+            this.channel = null;
+            this.them = null;
+        });
+    }
+
+    connect(peerId: string): void {
+        if (!this.channel) {
+            this.channel = this.peer.connect(peerId);
+            this.them = peerId;
+            this.channel?.on('data', (data) => {
+                this._dataToPeerMessage(data, peerId);
+            });
+        }
+    }
+
+    private async _dataToPeerMessage(data: unknown, sender: string): Promise<PeerMessage | null> {
+        if (typeof data !== 'string') {
+            throw new Error('Invalid data type');
+        }
+        return this._parsePeerMessage(data, sender);
+    }
+
+    private async _parsePeerMessage(data: string, sender: string): Promise<PeerMessage | null> {
+        try {
+            if (data.length < 65) { //must be more than a hash, lame check
+                return null;
+            }
+            const messageHash = data.slice(0, 64);
+            
+            const contents = data.slice(64);
+
+            const computedHash = await getHash(this.win, contents+sender);
+            if (computedHash !== messageHash) {
+                console.error(`Hash mismatch: expected ${messageHash}, got ${computedHash}`);
+                return null;
+            }
+
+            const msg = JSON.parse(contents) as PeerMessage;
+            if (msg.command && msg.stateHash && msg.data) {
+                return msg;
+            } else {
+                return null;
+            }
+        } catch {
+            return null;
+        }
+    }
+
+    private async _packagePeerMessage(msg: PeerMessage): Promise<string> {
+        const contents = JSON.stringify(msg);
+        const hash = await getHash(this.win, contents+this.id);
+        return hash + contents;
     }
 }

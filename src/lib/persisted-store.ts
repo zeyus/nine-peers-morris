@@ -1,7 +1,11 @@
 import { persisted, type Persisted } from 'svelte-persisted-store';
 
-export const peerConfig: Persisted<{
+export type PeerConfig = {
     pId: string | null;
-}> = persisted('peerConfig', {
+};
+
+export type PersistedPeerConfig = Persisted<PeerConfig>;
+
+export const peerConfig: PersistedPeerConfig = persisted('peerConfig', {
     pId: null,
 });
