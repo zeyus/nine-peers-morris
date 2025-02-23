@@ -86,7 +86,7 @@ export abstract class PeerState {
     }
 
     abstract startGame(win: Window): void;
-
+    // option 1, handle message in the state/Comms
     async handleMessage(msg: PeerMessage): Promise<void> {
         // Check if the hash is valid
         const hash = await this._getHash(false, msg.data);
@@ -165,8 +165,11 @@ export class GameClient extends PeerState {
 }
 
 
-// wip: handle all the peerjs stuff here
-// rather than having this logic in the components
+// option 2: handle all the peerjs stuff here
+// rather than having this logic in the components (or in the state)...
+// this might make more sense?
+// i don't like any of this having to have a window object
+// but the there's no crypto without it
 export class PeerBroker {
     private peer: Peer;
     private win: Window;
