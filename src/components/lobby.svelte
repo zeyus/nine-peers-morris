@@ -113,12 +113,12 @@
             <ButtonGroup>
                 <Button color="green" onclick={() => {
                     console.log('accepting');
-                    dataConnection!.send(PeerCommands.IWillPlayWithYou);
+                    role!.messageFromCommand(PeerCommands.IWillPlayWithYou).then((msg) => dataConnection!.send(msg));
                     modalVisible = false;
                 }}>Accept</Button>
                 <Button color="red" onclick={() => {
                     console.log('rejecting');
-                    dataConnection!.send(PeerCommands.IWontPlayWithYou);
+                    role!.messageFromCommand(PeerCommands.IWontPlayWithYou).then((msg) => dataConnection!.send(msg));
                     modalVisible = false;
                 }}>Reject</Button>
             </ButtonGroup>
