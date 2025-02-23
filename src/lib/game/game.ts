@@ -345,6 +345,12 @@ export abstract class Game implements Hashable {
 
     abstract dehydrate(): string;
 
+    abstract getStateHash(): Promise<string>;
+
+    protected abstract _addHash(hash: string): void;
+
+    protected abstract _validateHash(hash: string): boolean;
+
 }
 
 // for checking after turns that
@@ -380,7 +386,7 @@ export class SubscribableNum extends Number implements Subscribable {
 
 
 export class NinePeersMorris extends Game {
-    protected turn: Subscribable;
+    protected turn: SubscribableNum;
     private win: Window;
     private ready: boolean;
 
@@ -408,12 +414,20 @@ export class NinePeersMorris extends Game {
         }
         this.ready = false;
         this.getStateHash().then(hash => {
-            this.gameStateHash[newTurn] = hash;
+            this._addHash(hash, newTurn - 1); // this might need to change
             this.ready = true;
         });
     }
 
     async getStateHash(): Promise<string> {
         return getHash(this.win, this.dehydrate());
+    }
+
+    protected _addHash(hash: string, turn?: number): void {
+        this.gameStateHash[turn || this.turn.value] = hash;
+    }
+
+    protected _validateHash(hash: string, turn?: number): boolean {
+        return this.gameStateHash[turn || this.turn.value] === hash;
     }
 }

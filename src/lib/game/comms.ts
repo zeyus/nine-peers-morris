@@ -1,4 +1,5 @@
 import { Player, NinePeersMorris, Game } from "./game";
+import { getHash } from "./hashable";
 
 export const enum PeerCommands {
     Helo = 'HELO',
@@ -15,10 +16,16 @@ export const enum PeerCommands {
     GameOver = 'GAME_OVER',
 }
 
+
+export const enum PeerRole {
+    Host,
+    Client,
+}
+
 export type PeerMessage = {
     command: PeerCommands;
-    stateHash: string;
-    newStateHash?: string;
+    stateHash: string | null; // this should only be null for the first message
+    newStateHash: string;
     data: string;
 };
 
@@ -32,10 +39,32 @@ export const enum PeerState {
     Blocked,
 }
 
-abstract class PeerStatus {
+export class PeerData {
+    static dataToPeerMessage(rawData: string): PeerMessage {
+        const parts = rawData.split(':');
+        const command = parts[0];
+        const stateHash = parts[1] === '' ? null : parts[1];
+        const newStateHash = parts[2];
+        const data = parts.slice(3).join(':');
+        return {
+            command: command as PeerCommands,
+            stateHash,
+            newStateHash,
+            data,
+        };
+    }
+
+    static peerMessageToData(msg: PeerMessage): string {
+        return `${msg.command}:${msg.stateHash || ''}:${msg.newStateHash}:${msg.data}`;
+    }
+}
+
+export abstract class PeerStatus {
     me: string;
     them: string;
     state: PeerState;
+    role: PeerRole = PeerRole.Host;
+    lastStateHash: string | null = null;
     protected game: Game | null = null;
 
     constructor(me: string, them: string) {
@@ -44,9 +73,19 @@ abstract class PeerStatus {
         this.state = PeerState.Connecting;
     }
 
+    getHost(): string {
+        return this.role === PeerRole.Host ? this.me : this.them;
+    }
+
     abstract startGame(win: Window): void;
 
-    handleMessage(msg: PeerMessage): void {
+    async handleMessage(msg: PeerMessage): Promise<void> {
+        // Check if the hash is valid
+        const hash = await this._getHash(false, msg.data);
+        if (msg.newStateHash !== hash || msg.stateHash !== this.lastStateHash) {
+            throw new Error('Hash mismatch'); // @TODO: this is firing, have to figure out why
+        }
+        this.lastStateHash = msg.stateHash;
         if (msg.command === PeerCommands.Play) {
             if (this.state === PeerState.Connecting) {
                 //
@@ -62,8 +101,33 @@ abstract class PeerStatus {
         }
     }
     
-    send(msg: PeerMessage): void {
-        //
+    async prepareMessage(command: PeerCommands, data: string): Promise<PeerMessage> {
+        const msg: PeerMessage = {
+            command,
+            stateHash: this.lastStateHash,
+            newStateHash: await this._getHash(true, data),
+            data,
+        };
+        // update lastStateHash
+        this.lastStateHash = msg.newStateHash!;
+        return msg;
+        
+    }
+
+
+    private async _getHash(outgoing: boolean, data?: string): Promise<string> {
+        const win = window || null;
+        if (win === null) {
+            throw new Error('No window object');
+        }
+        const recipient = outgoing ? this.them : this.me;
+        return await this.game?.getStateHash() || await getHash(win, `${this.getHost()}:${recipient}:${data}`);
+
+    }
+
+    async messageFromCommand(command: PeerCommands, data: string = ''): Promise<string> {
+        const msg = await this.prepareMessage(command, data);
+        return PeerData.peerMessageToData(msg);
     }
 }
 
@@ -82,6 +146,7 @@ export class GameHost extends PeerStatus {
 export class GameClient extends PeerStatus {
     constructor(me: string, them: string) {
         super(me, them);
+        this.role = PeerRole.Client;
     }
 
     startGame(win: Window): void {
