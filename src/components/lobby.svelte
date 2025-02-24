@@ -42,13 +42,13 @@
             them = conn.peer;
             metadata = conn.metadata;
 
-            dataConnection?.on('data', function(data){
+            dataConnection?.on('data', async function(data){
                 if (!role && them) {
                     role = new GameClient($peerConfig.pId!, them);
                 }
                 const msg = PeerData.dataToPeerMessage(data as string);
                 console.log(msg);
-                role!.handleMessage(msg);
+                await role!.handleMessage(msg);
 
                 if (role?.role === PeerRole.Client) {
                     if (msg.command === PeerCommands.Helo) {
@@ -81,10 +81,10 @@
                 console.log('dataConnection open');
                 role.messageFromCommand(PeerCommands.Helo).then((msg) => dataConnection!.send(msg));
             });
-            dataConnection!.on('data', function(data){
+            dataConnection!.on('data', async function(data){
                 const msg = PeerData.dataToPeerMessage(data as string);
                 console.log(msg);
-                role!.handleMessage(msg);
+                await role!.handleMessage(msg);
                 if (role?.role === PeerRole.Host) {
                     if (msg.command === PeerCommands.Elho) {
                         role.messageFromCommand(PeerCommands.PlayWithMe).then((msg) => dataConnection!.send(msg));

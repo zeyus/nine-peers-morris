@@ -90,10 +90,15 @@ export abstract class PeerState {
     async handleMessage(msg: PeerMessage): Promise<void> {
         // Check if the hash is valid
         const hash = await this._getHash(false, msg.data);
+        console.log(`Hash: ${hash}`);
+        console.log(`(msg)New State Hash: ${msg.newStateHash}`);
+        console.log(`data: ${msg.data}`);
+        console.log(`lastStateHash: ${this.lastStateHash}`);
+        console.log(`(msg)stateHash: ${msg.stateHash}`);
         if (msg.newStateHash !== hash || msg.stateHash !== this.lastStateHash) {
-            throw new Error('Hash mismatch'); // @TODO: this is firing, have to figure out why
+            throw new Error('Hash mismatch');
         }
-        this.lastStateHash = msg.stateHash;
+        this.lastStateHash = msg.newStateHash;
         if (msg.command === PeerCommands.Play) {
             if (this.state === PeerStatus.Connecting) {
                 //
@@ -235,7 +240,7 @@ export class PeerBroker {
 
             const computedHash = await getHash(this.win, contents+sender);
             if (computedHash !== messageHash) {
-                console.error(`Hash mismatch: expected ${messageHash}, got ${computedHash}`);
+                //console.error(`Hash mismatch: expected ${messageHash}, got ${computedHash}`);
                 return null;
             }
 

@@ -402,7 +402,7 @@ export class NinePeersMorris extends Game {
     dehydrate(): string {
         return JSON.stringify({
             players: [this.players[0].dehydrate(), this.players[1].dehydrate()],
-            currentPlayer: this.currentPlayer,
+            currentPlayer: this.currentPlayer.id,
             winner: this.winner,
             turn: this.turn.valueOf()
         });
