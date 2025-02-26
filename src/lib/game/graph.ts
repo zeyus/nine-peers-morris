@@ -4,6 +4,7 @@ import { type Hashable } from './hashable';
 
 export class Graph<T> implements Hashable {
     adjList: Map<T, T[]>;
+    isSorted: boolean = false;
 
     constructor(vertices: T[]) {
         this.adjList = new Map<T, T[]>();
@@ -13,8 +14,23 @@ export class Graph<T> implements Hashable {
         }
     }
 
+    sort(fn: (a: T, b: T) => number): void {
+        const sorted = this.sorted(fn);
+        const adjList = new Map<T, T[]>();
+        for (const v of sorted) {
+            adjList.set(v, this.adjList.get(v) || []);
+        }
+        this.adjList = adjList;
+        this.isSorted = true;
+    }
+    
+    sorted(fn: (a: T, b: T) => number): T[] {
+        return Array.from(this.adjList.keys()).sort(fn);
+    }
+
     addVertice(v: T) {
         this.adjList.set(v, []);
+        this.isSorted = false;
     }
 
     addEdge(v: T, w: T) {

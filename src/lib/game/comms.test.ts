@@ -6,7 +6,7 @@ import { getHash } from "$lib/game/hashable";
 
 const crypto = {
     subtle: {
-        digest: vi.fn().mockResolvedValue(new Uint8Array(256/8))
+        digest: vi.fn().mockResolvedValue(new Uint8Array(32))
     },
     randomUUID: vi.fn().mockReturnValue('test-uuid')
 };

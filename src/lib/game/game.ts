@@ -156,6 +156,7 @@ export class Board implements Hashable {
     players: Player[];
     fly: boolean;
     flyAt: number;
+    [index: number]: Cell;
 
     constructor(boardOptions?: BoardOptions) {
         const options = { ...defaultOptions, ...boardOptions };
@@ -183,7 +184,9 @@ export class Board implements Hashable {
             this.state = new Graph<Cell>(Array.from({ length: this.cellCount }, (_, i) => {
                 const row = Math.floor(i / 3);
                 const col = i % 3;
-                return new Cell(i, row, col);
+                const cell = new Cell(i, row, col);
+                this[i] = cell;
+                return cell;
             }));
         }
     }
@@ -262,18 +265,25 @@ export class Board implements Hashable {
 
 export class NineBoard extends Board {
     constructor(players: Player[]) {
+        const cells: Cell[] = [];
         const graph = new Graph<Cell>(Array.from({ length: 24 }, (_, i) => {
             if (i < 12) {
                 const row = Math.floor(i / 3);
                 const col = i % 3;
-                return new Cell(i, row, col);
+                const cell = new Cell(i, row, col);
+                cells.push(cell);
+                return cell;
             }
             const row = Math.floor((i - 1) / 3);
             if (i < 15) {
-                return new Cell(i, row, 3);
+                const cell = new Cell(i, row, 3);
+                cells.push(cell);
+                return cell;
             }
             const col = (i-1) % 3;
-            return new Cell(i, 3, col);
+            const cell = new Cell(i, 3, col);
+            cells.push(cell);
+            return cell;
         }));
         /**
          *     0----------1----------2
@@ -320,6 +330,9 @@ export class NineBoard extends Board {
             millCount: 3
         };
         super(options);
+        for (let i = 0; i < 24; i++) {
+            this[i] = cells[i];
+        }
     }
 }
 

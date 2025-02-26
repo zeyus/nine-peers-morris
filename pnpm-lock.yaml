@@ -15,6 +15,9 @@ importers:
       '@msgpack/msgpack':
         specifier: 3.1.0
         version: 3.1.0
+      '@tailwindcss/vite':
+        specifier: ^4.0.8
+        version: 4.0.8(vite@6.1.1(@types/node@22.13.5)(jiti@2.4.2)(lightningcss@1.29.1)(yaml@2.7.0))
       eventemitter3:
         specifier: ^5.0.1
         version: 5.0.1
@@ -24,6 +27,9 @@ importers:
       svelte-persisted-store:
         specifier: ^0.12.0
         version: 0.12.0(svelte@5.20.2)
+      tailwindcss:
+        specifier: 4.0.8
+        version: 4.0.8
       webrtc-adapter:
         specifier: ^9.0.1
         version: 9.0.1
@@ -55,9 +61,6 @@ importers:
       '@tailwindcss/typography':
         specifier: ^0.5.16
         version: 0.5.16(tailwindcss@4.0.8)
-      '@tailwindcss/vite':
-        specifier: ^4.0.8
-        version: 4.0.8(vite@6.1.1(@types/node@22.13.5)(jiti@2.4.2)(lightningcss@1.29.1)(yaml@2.7.0))
       '@types/node':
         specifier: ^22.13.5
         version: 22.13.5
@@ -100,9 +103,6 @@ importers:
       svelte-check:
         specifier: ^4.1.4
         version: 4.1.4(picomatch@4.0.2)(svelte@5.20.2)(typescript@5.7.3)
-      tailwindcss:
-        specifier: 4.0.8
-        version: 4.0.8
       typescript:
         specifier: ^5.7.3
         version: 5.7.3
