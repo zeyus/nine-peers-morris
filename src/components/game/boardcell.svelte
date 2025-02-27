@@ -7,12 +7,12 @@
     } = $props();
 </script>
 {#if cell}
-    <div class="size-full z-10 grid place-content-center" class:placed={cell.piece}>
+    <div class="size-full z-10 grid place-items-center" class:placed={cell.piece}>
         {#if cell.piece}
             <Piece piece={cell.piece} />
         
         {:else}
-            <div class="rounded-full bg-purple-900 w-4 h-4 mt-2 ml-2 z-10 border-2 border-pink-400"></div>
+            <div class="rounded-full bg-purple-900 size-[2vw] mt-[1vw] ml-[1vw] z-10 border-[0.5vw] border-pink-400"></div>
         {/if}
     </div>
 {/if}

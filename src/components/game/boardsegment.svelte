@@ -11,16 +11,16 @@
 </script>
 <div class="segment aspect-square relative">
     {#if n}
-        <div class="line top-0 left-1/2 h-1/2 w-2 bg-pink-800 absolute"></div>
+        <div class="line top-0 left-1/2 h-1/2 w-[1vw] bg-pink-800 absolute"></div>
     {/if}
     {#if e}
-        <div class="line top-1/2 right-0 h-2 w-1/2 bg-pink-800 absolute"></div>
+        <div class="line top-1/2 right-0 h-[1vw] w-1/2 bg-pink-800 absolute"></div>
     {/if}
     {#if s}
-        <div class="line bottom-0 left-1/2 h-1/2 w-2 bg-pink-800 absolute"></div>
+        <div class="line bottom-0 left-1/2 h-1/2 w-[1vw] bg-pink-800 absolute"></div>
     {/if}
     {#if w}
-        <div class="line top-1/2 left-0 h-2 w-1/2 bg-pink-800 absolute"></div>
+        <div class="line top-1/2 left-0 h-[1vw] w-1/2 bg-pink-800 absolute"></div>
     {/if}
     <BoardCell cell={cell} />
 </div>

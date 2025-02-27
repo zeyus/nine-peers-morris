@@ -6,5 +6,12 @@
     const p2 = new Player("Player 2", "O", false);
     // create a new board
     const board = new NineBoard([p1, p2]);
+    // place some demo pieces
+    const pi1 = p1.nextPiece;
+    const pi2 = p2.nextPiece;
+    
+    board.placePiece(pi1!, board.getCell(0));
+    board.placePiece(pi2!, board.getCell(1));
+
 </script>
 <NineGameBoard board={board} />

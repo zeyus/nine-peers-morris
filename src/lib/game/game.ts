@@ -35,6 +35,13 @@ export class Player implements Hashable {
     get pieceCount(): number {
         return this.pieces.length;
     }
+    get nextPiece(): GamePiece | null {
+        const availablePieces = this.pieces.filter(piece => piece.state === 'unplaced');
+        if (availablePieces.length === 0) {
+            return null;
+        }
+        return availablePieces[0];
+    }
     dehydrate(): string {
         return JSON.stringify({
             id: this.id,
