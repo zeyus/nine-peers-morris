@@ -22,6 +22,8 @@ export const enum PeerCommands {
     Error = 'ERROR',
     HashMismatch = 'HASH_MISMATCH',
     GameOver = 'GAME_OVER',
+    Move = 'MOVE',
+    MoveAck = 'MOVE_ACK',
 }
 
 
@@ -72,7 +74,7 @@ export abstract class PeerState {
     them: string;
     state: PeerStatus;
     role: PeerRole = PeerRole.Host;
-    lastStateHash: string | null = null;
+    public lastStateHash: string | null = null;
     protected game: Game | null = null;
 
     constructor(me: string, them: string) {
@@ -88,17 +90,57 @@ export abstract class PeerState {
     abstract startGame(win: Window): void;
     // option 1, handle message in the state/Comms
     async handleMessage(msg: PeerMessage): Promise<void> {
-        // Check if the hash is valid
-        const hash = await this._getHash(false, msg.data);
-        console.log(`Hash: ${hash}`);
-        console.log(`(msg)New State Hash: ${msg.newStateHash}`);
-        console.log(`data: ${msg.data}`);
-        console.log(`lastStateHash: ${this.lastStateHash}`);
+        console.log(`Received message: ${msg.command}`);
         console.log(`(msg)stateHash: ${msg.stateHash}`);
-        if (msg.newStateHash !== hash || msg.stateHash !== this.lastStateHash) {
+        console.log(`lastStateHash: ${this.lastStateHash}`);
+        console.log(`data: ${msg.data}`);
+        
+        // Always validate that the sender's state hash matches our current state
+        if (msg.stateHash !== this.lastStateHash) {
+            console.error('State hash mismatch - games are out of sync');
             throw new Error('Hash mismatch');
         }
-        this.lastStateHash = msg.newStateHash;
+        
+        if (msg.command === PeerCommands.Move) {
+            // Opponent made a move, apply it to our game
+            if (this.game && msg.data) {
+                try {
+                    const moveData = JSON.parse(msg.data);
+                    console.log('Received move from opponent:', moveData);
+                    
+                    // Apply the move to our game instance
+                    const success = this.game.applyMove(moveData);
+                    if (success) {
+                        // Update our state hash to reflect the new game state
+                        this.lastStateHash = await this.game.getStateHash();
+                        console.log('Move applied successfully, new hash:', this.lastStateHash);
+                        
+                        // Force a reactive update by triggering the turn counter
+                        // This ensures Svelte detects the game state change
+                        if (this.game.getTurn) {
+                            this.game.getTurn.value = this.game.getTurn.valueOf();
+                        }
+                    } else {
+                        console.error('Failed to apply opponent move');
+                        throw new Error('Invalid move received');
+                    }
+                } catch (error) {
+                    console.error('Error applying opponent move:', error);
+                    throw error;
+                }
+            }
+        } else {
+            // For other messages, validate the computed hash
+            const hash = await this._getHash(false, msg.data);
+            console.log(`Computed hash: ${hash}`);
+            console.log(`(msg)New State Hash: ${msg.newStateHash}`);
+            
+            if (msg.newStateHash !== hash) {
+                throw new Error('Hash mismatch');
+            }
+            this.lastStateHash = msg.newStateHash;
+        }
+        
         if (msg.command === PeerCommands.Play) {
             if (this.state === PeerStatus.Connecting) {
                 //
@@ -141,6 +183,11 @@ export abstract class PeerState {
     async messageFromCommand(command: PeerCommands, data: string = ''): Promise<string> {
         const msg = await this.prepareMessage(command, data);
         return PeerData.peerMessageToData(msg);
+    }
+
+    async sendMove(moveData: any): Promise<string> {
+        const moveJson = JSON.stringify(moveData);
+        return await this.messageFromCommand(PeerCommands.Move, moveJson);
     }
 }
 

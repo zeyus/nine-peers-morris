@@ -10,6 +10,8 @@
     import { Spinner, Modal, Button, ButtonGroup } from 'flowbite-svelte';
     import PeerList from '../components/peer-list.svelte';
     import { PeerCommands, GameHost, GameClient, PeerData, PeerRole, type PeerState } from "$lib/game/comms";
+    import { goto } from '$app/navigation';
+    import { gameSession, gameSessionActions } from '$lib/game-state-store';
 
     let p: Peer | null = $state(null);
     let supported: boolean | null = $state(null);
@@ -45,6 +47,14 @@
             dataConnection?.on('data', async function(data){
                 if (!role && them) {
                     role = new GameClient($peerConfig.pId!, them);
+                    role.startGame(window);
+                    gameSessionActions.setGameSession({
+                        peerState: role,
+                        dataConnection: dataConnection,
+                        opponentId: them,
+                        game: role.game,
+                        isConnected: true
+                    });
                 }
                 const msg = PeerData.dataToPeerMessage(data as string);
                 console.log(msg);
@@ -73,11 +83,19 @@
     });
     let modalVisible = $state(false);
     const onConnectRequest = (pId: string) => {
-        console.log('connecting to', pId);
+        console.log('onConnectRequest called with pId:', pId);
         if (p) {
             dataConnection = p.connect(pId, { metadata: { gameName: randomName() }});
             dataConnection!.on('open', () => {
                 role = new GameHost($peerConfig.pId!, pId);
+                role.startGame(window);
+                gameSessionActions.setGameSession({
+                    peerState: role,
+                    dataConnection: dataConnection,
+                    opponentId: pId,
+                    game: role.game,
+                    isConnected: true
+                });
                 console.log('dataConnection open');
                 role.messageFromCommand(PeerCommands.Helo).then((msg) => dataConnection!.send(msg));
             });
@@ -90,6 +108,7 @@
                         role.messageFromCommand(PeerCommands.PlayWithMe).then((msg) => dataConnection!.send(msg));
                     } else if (msg.command === PeerCommands.LetsPlay) {
                         console.log('accepted by', dataConnection!.metadata.clientName);
+                        goto('/board');
                     } else if (msg.command === PeerCommands.NoThanks) {
                         console.log('rejected');
                     }
@@ -103,40 +122,99 @@
         }
     };
 </script>
-{#if p && $peerConfig.pId}
-    <h1>Peer ID: {$peerConfig.pId}</h1>
-    <h2>Peers</h2>
-    <PeerList pId={$peerConfig.pId} {onConnectRequest} />
-    {#if modalVisible}
-        <Modal title="Connecting" open={modalVisible} on:close={() => modalVisible = false} dismissable={false}>
-            <p>Game request from {them}, {metadata?.hostName} would you like to play?</p>
-            <ButtonGroup>
-                <Button color="green" onclick={() => {
-                    console.log('accepting');
-                    role!.messageFromCommand(PeerCommands.LetsPlay).then((msg) => dataConnection!.send(msg));
-                    modalVisible = false;
-                }}>Accept</Button>
-                <Button color="red" onclick={() => {
-                    console.log('rejecting');
-                    role!.messageFromCommand(PeerCommands.NoThanks).then((msg) => dataConnection!.send(msg));
-                    modalVisible = false;
-                }}>Reject</Button>
-            </ButtonGroup>
-        </Modal>
-    {/if}
-    {#if them}
-        <p>Connected to {them}</p>
-    {/if}
-    {#if dataConnection}
-        <button onclick={() => {
-            console.log('sending data');
-            dataConnection!.send('hi!');
-        }}>Send</button>
-    {/if}
-{:else}
-    {#if supported === false}
-        <p>Sorry, your browser does not support WebRTC</p>
-    {:else}
-        <Spinner />
-    {/if}
-{/if}
+<div class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+    <div class="max-w-4xl mx-auto">
+        {#if p && $peerConfig.pId}
+            <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                <div class="text-center mb-6">
+                    <h1 class="text-3xl font-bold text-gray-800 mb-2">Nine Men's Morris</h1>
+                    <p class="text-gray-600">Multiplayer Lobby</p>
+                </div>
+                
+                <div class="bg-gray-50 rounded-lg p-4 mb-6">
+                    <div class="flex items-center justify-center space-x-2">
+                        <span class="text-sm font-medium text-gray-500">Your Peer ID:</span>
+                        <span class="font-mono text-lg font-semibold text-indigo-600 bg-white px-3 py-1 rounded border">
+                            {$peerConfig.pId}
+                        </span>
+                    </div>
+                </div>
+
+                {#if them}
+                    <div class="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+                        <div class="flex items-center justify-center space-x-2">
+                            <div class="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                            <span class="text-green-800 font-medium">Connected to {them}</span>
+                        </div>
+                    </div>
+                {/if}
+                
+                <div class="space-y-4">
+                    <h2 class="text-xl font-semibold text-gray-800 flex items-center space-x-2">
+                        <span>Available Players</span>
+                        <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                    </h2>
+                    <PeerList pId={$peerConfig.pId} {onConnectRequest} />
+                </div>
+            </div>
+
+            {#if modalVisible}
+                <Modal title="Game Invitation" open={modalVisible} on:close={() => modalVisible = false} dismissable={false}>
+                    <div class="text-center p-6">
+                        <div class="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <svg class="w-8 h-8 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2m-2-4H9m8 0V9a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2h6a2 2 0 002-2V9z"></path>
+                            </svg>
+                        </div>
+                        <h3 class="text-lg font-semibold text-gray-900 mb-2">Game Request!</h3>
+                        <p class="text-gray-600 mb-6">
+                            <span class="font-medium">{them}</span> would like to play Nine Men's Morris with you.
+                        </p>
+                        <ButtonGroup class="justify-center">
+                            <Button color="green" size="lg" onclick={() => {
+                                console.log('accepting');
+                                role!.messageFromCommand(PeerCommands.LetsPlay).then((msg) => dataConnection!.send(msg));
+                                modalVisible = false;
+                                goto('/board');
+                            }}>
+                                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                </svg>
+                                Accept Game
+                            </Button>
+                            <Button color="red" size="lg" onclick={() => {
+                                console.log('rejecting');
+                                role!.messageFromCommand(PeerCommands.NoThanks).then((msg) => dataConnection!.send(msg));
+                                modalVisible = false;
+                            }}>
+                                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                                Decline
+                            </Button>
+                        </ButtonGroup>
+                    </div>
+                </Modal>
+            {/if}
+        {:else}
+            <div class="flex items-center justify-center min-h-screen">
+                <div class="text-center">
+                    {#if supported === false}
+                        <div class="bg-red-50 border border-red-200 rounded-lg p-6">
+                            <svg class="w-12 h-12 text-red-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L5.082 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+                            </svg>
+                            <h3 class="text-lg font-semibold text-red-800 mb-2">Browser Not Supported</h3>
+                            <p class="text-red-600">Sorry, your browser does not support WebRTC which is required for peer-to-peer gaming.</p>
+                        </div>
+                    {:else}
+                        <div class="bg-white rounded-xl shadow-lg p-8">
+                            <Spinner size="8" color="blue" />
+                            <p class="text-gray-600 mt-4">Connecting to lobby...</p>
+                        </div>
+                    {/if}
+                </div>
+            </div>
+        {/if}
+    </div>
+</div>
