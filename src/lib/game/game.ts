@@ -397,16 +397,22 @@ export class NineBoard extends Board {
 
 
 export abstract class Game implements Hashable {
+    protected turn: SubscribableNum;
+    public millToRemove: boolean = false;
     protected players: Player[];
     protected board: Board;
     protected currentPlayer: Player;
     protected winner: Player | null;
     protected gameStateHash: GameStateHash;
+    public validMoves: readonly Cell[] = [];
+    public phase: GamePhase;
 
     constructor(me: Player, them: Player, board: Board) {
         if (me === them) {
             throw new Error('Players must be different');
         }
+        this.turn = new SubscribableNum(0);
+        this.phase = GamePhase.Placement;
         // initiator first to simplify dehydrating and hashing...for now
         this.players = me.isInitiator ? [me, them] : [them, me];
         this.board = board;
@@ -415,7 +421,14 @@ export abstract class Game implements Hashable {
         this.gameStateHash = {};
     }
 
+    abstract canPlacePiece(): boolean;
+
+    abstract handleCellClick(cell: Cell): GameMove | null;
+    abstract handleCellClickForced(cell: Cell): GameMove | null;
+
     abstract dehydrate(): string;
+
+    abstract applyMove(move: GameMove): boolean;
 
     abstract getStateHash(): Promise<string>;
 
@@ -426,6 +439,10 @@ export abstract class Game implements Hashable {
     // Public getters for read-only access
     get getCurrentPlayer(): Player {
         return this.currentPlayer;
+    }
+
+    get getTurn(): SubscribableNum {
+        return this.turn;
     }
     
     get getWinner(): Player | null {
@@ -477,14 +494,13 @@ export class SubscribableNum extends Number implements Subscribable {
  * Main game class for Nine Men's Morris with peer-to-peer functionality
  */
 export class NinePeersMorris extends Game {
-    protected turn: SubscribableNum;
+    
     private win: Window;
     private ready: boolean;
-    public phase: GamePhase;
     public selectedPiece: GamePiece | null = null;
     public selectedCell: Cell | null = null;
-    public validMoves: readonly Cell[] = [];
-    public millToRemove: boolean = false;
+    
+    
     public removablePieces: readonly GamePiece[] = [];
 
     /**
@@ -496,9 +512,7 @@ export class NinePeersMorris extends Game {
     constructor(win: Window, me: Player, them: Player) {
         super(me, them, new NineBoard([me, them]));
         this.win = win;
-        this.turn = new SubscribableNum(0);
         this.ready = true;
-        this.phase = GamePhase.Placement;
         this.onTurnChange(0);
         this.turn.subscribe(this.onTurnChange.bind(this));
     }
@@ -553,7 +567,7 @@ export class NinePeersMorris extends Game {
 
     /** Checks if the current player can move a piece */
     canMovePiece(): boolean {
-        return this.phase === GamePhase.Movement && this.isMyTurn();
+        return this.phase === GamePhase.Movement;
     }
 
     /** Checks if the current player can remove an opponent's piece */
@@ -609,12 +623,83 @@ export class NinePeersMorris extends Game {
             case GamePhase.Placement:
                 return this.handlePlacementClickForced(cell);
             case GamePhase.Movement:
-                return this.handleMovementClick(cell);
+                return this.handleMovementClickForced(cell);
             case GamePhase.Capture:
                 return this.handleCaptureClickForced(cell);
             default:
                 return null;
         }
+    }
+
+    private handleMovementClickForced(cell: Cell): GameMove | null {
+        // Same as handleMovementClick but without the canMovePiece() check
+        if (this.phase !== GamePhase.Movement) return null;
+
+        // If clicking on own piece, select it
+        if (cell.piece && cell.piece.player.id === this.currentPlayer.id) {
+            this.selectedPiece = cell.piece;
+            this.selectedCell = cell;
+            this.validMoves = this.getValidMoves(cell.piece);
+            console.log('Selected piece for movement (forced):', {
+                pieceId: cell.piece.id,
+                cellId: cell.id,
+                validMovesCount: this.validMoves.length,
+                canFly: cell.piece.player.pieceCount <= 3
+            });
+            return null;
+        }
+
+        // If clicking on empty cell with selected piece
+        if (!cell.piece && this.selectedPiece && this.validMoves.includes(cell)) {
+            const fromCell = this.selectedPiece.cell!;
+            
+            try {
+                if (this.selectedPiece.player.pieceCount <= 3) {
+                    this.board.flyPiece(this.selectedPiece, cell);
+                } else {
+                    this.board.movePiece(this.selectedPiece, cell);
+                }
+
+                const move: GameMove = {
+                    action: GameAction.MovePiece,
+                    playerId: this.currentPlayer.id,
+                    pieceId: this.selectedPiece.id,
+                    fromCellId: fromCell.id,
+                    toCellId: cell.id
+                };
+
+                this.selectedPiece = null;
+                this.selectedCell = null;
+                this.validMoves = Object.freeze([]);
+
+                // Check for mill
+                if (this.board.checkForMill(cell)) {
+                    this.millToRemove = true;
+                    this.removablePieces = this.getRemovablePieces(this.currentPlayer);
+                    this.phase = GamePhase.Capture;
+                } else {
+                    this.nextTurn();
+                }
+
+                return move;
+            } catch (error) {
+                console.error('Error moving piece (forced):', error);
+                // Reset selection on error
+                this.selectedPiece = null;
+                this.selectedCell = null;
+                this.validMoves = Object.freeze([]);
+                return null;
+            }
+        }
+
+        // If clicking elsewhere, clear selection
+        if (this.selectedPiece) {
+            this.selectedPiece = null;
+            this.selectedCell = null;
+            this.validMoves = Object.freeze([]);
+        }
+
+        return null;
     }
 
     private handlePlacementClickForced(cell: Cell): GameMove | null {
@@ -692,7 +777,14 @@ export class NinePeersMorris extends Game {
         // If clicking on own piece, select it
         if (cell.piece && cell.piece.player.id === this.currentPlayer.id) {
             this.selectedPiece = cell.piece;
+            this.selectedCell = cell;
             this.validMoves = this.getValidMoves(cell.piece);
+            console.log('Selected piece for movement:', {
+                pieceId: cell.piece.id,
+                cellId: cell.id,
+                validMovesCount: this.validMoves.length,
+                canFly: cell.piece.player.pieceCount <= 3
+            });
             return null;
         }
 
@@ -700,33 +792,50 @@ export class NinePeersMorris extends Game {
         if (!cell.piece && this.selectedPiece && this.validMoves.includes(cell)) {
             const fromCell = this.selectedPiece.cell!;
             
-            if (this.selectedPiece.player.pieceCount <= 3) {
-                this.board.flyPiece(this.selectedPiece, cell);
-            } else {
-                this.board.movePiece(this.selectedPiece, cell);
+            try {
+                if (this.selectedPiece.player.pieceCount <= 3) {
+                    this.board.flyPiece(this.selectedPiece, cell);
+                } else {
+                    this.board.movePiece(this.selectedPiece, cell);
+                }
+
+                const move: GameMove = {
+                    action: GameAction.MovePiece,
+                    playerId: this.currentPlayer.id,
+                    pieceId: this.selectedPiece.id,
+                    fromCellId: fromCell.id,
+                    toCellId: cell.id
+                };
+
+                this.selectedPiece = null;
+                this.selectedCell = null;
+                this.validMoves = Object.freeze([]);
+
+                // Check for mill
+                if (this.board.checkForMill(cell)) {
+                    this.millToRemove = true;
+                    this.removablePieces = this.getRemovablePieces(this.currentPlayer);
+                    this.phase = GamePhase.Capture;
+                } else {
+                    this.nextTurn();
+                }
+
+                return move;
+            } catch (error) {
+                console.error('Error moving piece:', error);
+                // Reset selection on error
+                this.selectedPiece = null;
+                this.selectedCell = null;
+                this.validMoves = Object.freeze([]);
+                return null;
             }
+        }
 
-            const move: GameMove = {
-                action: GameAction.MovePiece,
-                playerId: this.currentPlayer.id,
-                pieceId: this.selectedPiece.id,
-                fromCellId: fromCell.id,
-                toCellId: cell.id
-            };
-
+        // If clicking elsewhere, clear selection
+        if (this.selectedPiece) {
             this.selectedPiece = null;
-            this.validMoves = [];
-
-            // Check for mill
-            if (this.board.checkForMill(cell)) {
-                this.millToRemove = true;
-                this.removablePieces = this.getRemovablePieces(this.currentPlayer);
-                this.phase = GamePhase.Capture;
-            } else {
-                this.nextTurn();
-            }
-
-            return move;
+            this.selectedCell = null;
+            this.validMoves = Object.freeze([]);
         }
 
         return null;
@@ -846,6 +955,7 @@ export class NinePeersMorris extends Game {
 
         // Reset UI state
         this.selectedPiece = null;
+        this.selectedCell = null;
         this.validMoves = Object.freeze([]);
     }
 
@@ -956,13 +1066,22 @@ export class NinePeersMorris extends Game {
         if (!fromCell || !toCell || !player || !fromCell.piece || toCell.piece) return false;
         if (fromCell.piece.id !== move.pieceId) return false;
         
-        // Apply the move
-        this.board.movePiece(fromCell.piece, toCell);
+        // Apply the move - use flying if player has <= 3 pieces
+        try {
+            if (player.pieceCount <= 3) {
+                this.board.flyPiece(fromCell.piece, toCell);
+            } else {
+                this.board.movePiece(fromCell.piece, toCell);
+            }
+        } catch (error) {
+            console.error('Error applying move piece:', error);
+            return false;
+        }
         
         // Check for mill and update game state
         if (this.board.checkForMill(toCell)) {
             this.millToRemove = true;
-            this.removablePieces = Object.freeze(this.getRemovablePieces(this.getOpponent(player)));
+            this.removablePieces = Object.freeze(this.getRemovablePieces(player));
             this.phase = GamePhase.Capture;
         } else {
             // Update current player and trigger reactive updates
@@ -971,6 +1090,7 @@ export class NinePeersMorris extends Game {
             
             // Reset UI state
             this.selectedPiece = null;
+            this.selectedCell = null;
             this.validMoves = Object.freeze([]);
         }
         

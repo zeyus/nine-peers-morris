@@ -74,7 +74,7 @@ export abstract class PeerState {
     them: string;
     state: PeerStatus;
     role: PeerRole = PeerRole.Host;
-    public lastStateHash: string | null = null;
+    protected lastStateHash: string | null = null;
     protected game: Game | null = null;
 
     constructor(me: string, them: string) {
@@ -87,6 +87,22 @@ export abstract class PeerState {
         return this.role === PeerRole.Host ? this.me : this.them;
     }
 
+    getGame(): Game | null {
+        return this.game;
+    }
+
+    get lastHash(): string | null {
+        return this.lastStateHash;
+    }
+
+    async updateStateHash(): Promise<boolean> {
+        if (this.game) {
+            this.lastStateHash = await this.game.getStateHash();
+            return true;
+        }
+        return false;
+    }
+
     abstract startGame(win: Window): void;
     // option 1, handle message in the state/Comms
     async handleMessage(msg: PeerMessage): Promise<void> {
@@ -96,7 +112,10 @@ export abstract class PeerState {
         console.log(`data: ${msg.data}`);
         
         // Always validate that the sender's state hash matches our current state
-        if (msg.stateHash !== this.lastStateHash) {
+        // Exception: HELO and EHLO messages can have null stateHash for initial handshake
+        if (msg.stateHash !== this.lastStateHash && 
+            !(msg.command === PeerCommands.Helo && msg.stateHash === null) &&
+            !(msg.command === PeerCommands.Elho && this.lastStateHash === null)) {
             console.error('State hash mismatch - games are out of sync');
             throw new Error('Hash mismatch');
         }
@@ -185,7 +204,7 @@ export abstract class PeerState {
         return PeerData.peerMessageToData(msg);
     }
 
-    async sendMove(moveData: any): Promise<string> {
+    async sendMove(moveData: object): Promise<string> {
         const moveJson = JSON.stringify(moveData);
         return await this.messageFromCommand(PeerCommands.Move, moveJson);
     }

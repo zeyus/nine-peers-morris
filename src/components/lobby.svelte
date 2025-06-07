@@ -52,7 +52,7 @@
                         peerState: role,
                         dataConnection: dataConnection,
                         opponentId: them,
-                        game: role.game,
+                        game: role.getGame(),
                         isConnected: true
                     });
                 }
@@ -61,10 +61,13 @@
                 await role!.handleMessage(msg);
 
                 if (role?.role === PeerRole.Client) {
+                    console.log('CLIENT role confirmed in first handler, received:', msg.command);
                     if (msg.command === PeerCommands.Helo) {
                         role.messageFromCommand(PeerCommands.Elho).then((msg) => dataConnection!.send(msg));
                     } else if (msg.command === PeerCommands.PlayWithMe) {
+                        console.log('CLIENT: Setting modalVisible to true in first handler');
                         modalVisible = true;
+                        console.log('CLIENT: modalVisible is now:', modalVisible);
                     }
                 }
                 
@@ -82,6 +85,10 @@
         
     });
     let modalVisible = $state(false);
+    
+    $effect(() => {
+        console.log('modalVisible changed to:', modalVisible);
+    });
     const onConnectRequest = (pId: string) => {
         console.log('onConnectRequest called with pId:', pId);
         if (p) {
@@ -93,7 +100,7 @@
                     peerState: role,
                     dataConnection: dataConnection,
                     opponentId: pId,
-                    game: role.game,
+                    game: role.getGame(),
                     isConnected: true
                 });
                 console.log('dataConnection open');
@@ -102,6 +109,7 @@
             dataConnection!.on('data', async function(data){
                 const msg = PeerData.dataToPeerMessage(data as string);
                 console.log(msg);
+                console.log('Current role:', role?.role === PeerRole.Host ? 'HOST' : 'CLIENT');
                 await role!.handleMessage(msg);
                 if (role?.role === PeerRole.Host) {
                     if (msg.command === PeerCommands.Elho) {
@@ -111,6 +119,12 @@
                         goto('/board');
                     } else if (msg.command === PeerCommands.NoThanks) {
                         console.log('rejected');
+                    }
+                } else if (role?.role === PeerRole.Client) {
+                    console.log('CLIENT received message:', msg.command);
+                    if (msg.command === PeerCommands.PlayWithMe) {
+                        console.log('Setting modalVisible to true');
+                        modalVisible = true;
                     }
                 }
                 console.log('receiving data');
@@ -158,8 +172,7 @@
                 </div>
             </div>
 
-            {#if modalVisible}
-                <Modal title="Game Invitation" open={modalVisible} on:close={() => modalVisible = false} dismissable={false}>
+                <Modal title="Game Invitation" open={modalVisible} onclose={() => modalVisible = false} dismissable={false}>
                     <div class="text-center p-6">
                         <div class="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
                             <svg class="w-8 h-8 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -171,7 +184,7 @@
                             <span class="font-medium">{them}</span> would like to play Nine Men's Morris with you.
                         </p>
                         <ButtonGroup class="justify-center">
-                            <Button color="green" size="lg" onclick={() => {
+                            <Button size="lg" onclick={() => {
                                 console.log('accepting');
                                 role!.messageFromCommand(PeerCommands.LetsPlay).then((msg) => dataConnection!.send(msg));
                                 modalVisible = false;
@@ -182,7 +195,7 @@
                                 </svg>
                                 Accept Game
                             </Button>
-                            <Button color="red" size="lg" onclick={() => {
+                            <Button size="lg" onclick={() => {
                                 console.log('rejecting');
                                 role!.messageFromCommand(PeerCommands.NoThanks).then((msg) => dataConnection!.send(msg));
                                 modalVisible = false;
@@ -195,7 +208,6 @@
                         </ButtonGroup>
                     </div>
                 </Modal>
-            {/if}
         {:else}
             <div class="flex items-center justify-center min-h-screen">
                 <div class="text-center">

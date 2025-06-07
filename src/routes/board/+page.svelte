@@ -12,16 +12,16 @@
         turn: 0,
         winner: null as Player | null
     });
-
+    let session = $state(gameSession);
     // Make the session reactive so the board updates when peers connect
     $effect(() => {
-        const session = $gameSession;
+        
         console.log('Game session updated:', session);
         
-        if (session.game && session.isConnected) {
+        if ($session.game && $session.isConnected) {
             // Use the peer-connected game
-            game = session.game;
-            console.log('Using peer game session with opponent:', session.opponentId);
+            game = $session.game;
+            console.log('Using peer game session with opponent:', $session.opponentId);
             
             // Subscribe to game state changes if not already subscribed
             if (game.getTurn) {
@@ -124,9 +124,9 @@
                     session.dataConnection!.send(msg);
                     
                     // Update our own state hash after sending the move
-                    if (session.peerState!.game) {
-                        session.peerState!.lastStateHash = await session.peerState!.game.getStateHash();
-                        console.log('Updated our hash after move:', session.peerState!.lastStateHash);
+                    if (session.peerState!.getGame()) {
+                        await session.peerState!.updateStateHash();
+                        console.log('Updated our hash after move:', session.peerState!.lastHash);
                     }
                 }).catch(error => {
                     console.error('Error sending move:', error);
@@ -196,7 +196,7 @@
                     <div class="text-lg font-bold text-red-800 mb-1">🎯 Mill Formed!</div>
                     <div class="text-sm text-red-700">
                         {#if isMultiplayer}
-                            {#if (session.peerState?.role === 0 && gameState.currentPlayer?.name === "X") || (session.peerState?.role === 1 && gameState.currentPlayer?.name === "O")}
+                            {#if ($session.peerState?.role === 0 && gameState.currentPlayer?.name === "X") || ($session.peerState?.role === 1 && gameState.currentPlayer?.name === "O")}
                                 <strong>Your turn:</strong> Click on an opponent's piece to remove it
                             {:else}
                                 <strong>Opponent's turn:</strong> They are removing one of your pieces
@@ -212,7 +212,7 @@
     
     {#if game}
         {#key `${gameState.turn}-${gameState.phase}`}
-            <NineGameBoard board={game.getBoard} {game} onCellClick={handleCellClick} />
+            <NineGameBoard board={game.getBoard} game={(game as NinePeersMorris)} onCellClick={handleCellClick} />
         {/key}
     {/if}
 </div>

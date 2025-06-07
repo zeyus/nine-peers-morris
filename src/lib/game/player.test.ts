@@ -76,7 +76,7 @@ describe('Player', () => {
         it('should return null when no unplaced pieces', () => {
             // Mark all pieces as placed
             player.allPieces.forEach(piece => {
-                (piece as any).state = 'placed';
+                (piece as GamePiece).state = 'placed';
             });
             
             expect(player.nextPiece).toBeNull();
@@ -100,15 +100,15 @@ describe('Player', () => {
             const unplacedPieces = player.unplacedPieces;
             
             expect(() => {
-                (allPieces as any).push(new GamePiece(player, 'test'));
+                (allPieces as GamePiece[]).push(new GamePiece(player, 'test'));
             }).toThrow();
             
             expect(() => {
-                (placedPieces as any).push(new GamePiece(player, 'test'));
+                (placedPieces as GamePiece[]).push(new GamePiece(player, 'test'));
             }).toThrow();
             
             expect(() => {
-                (unplacedPieces as any).push(new GamePiece(player, 'test'));
+                (unplacedPieces as GamePiece[]).push(new GamePiece(player, 'test'));
             }).toThrow();
         });
     });

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { GameRules } from './rules';
-import { Player, GamePiece, Cell, NineBoard, GamePhase } from './game';
+import { Player, GamePiece, NineBoard, GamePhase } from './game';
 
 describe('GameRules', () => {
     let player1: Player;
@@ -166,12 +166,6 @@ describe('GameRules', () => {
         });
 
         it('should return true if opponent cannot move in movement phase', () => {
-            // Set up a scenario where player2 has pieces but cannot move
-            // This is complex to set up, so we'll test the basic case
-            const mockBoard = {
-                ...board,
-                getValidMovesForPiece: () => [] // Mock no valid moves
-            } as any;
             
             // Create a player with 3 pieces all placed but unable to move
             const blockedPlayer = new Player('blocked', 'Blocked', false);

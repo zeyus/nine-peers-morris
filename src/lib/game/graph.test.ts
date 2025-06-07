@@ -186,9 +186,9 @@ describe('Graph dehydrate', () => {
                 return { value: this.value };
             }
         }
-        let cv1 = new CustomVertex(1);
-        let cv2 = new CustomVertex(2);
-        let cv3 = new CustomVertex(3);
+        const cv1 = new CustomVertex(1);
+        const cv2 = new CustomVertex(2);
+        const cv3 = new CustomVertex(3);
         const customGraph = new Graph<CustomVertex>([
             cv1,
             cv2,
