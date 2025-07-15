@@ -4,6 +4,7 @@
     import { onMount } from "svelte";
     import { gameSession } from "$lib/game-state-store";
     import { goto } from '$app/navigation';
+    import { Modal, Button } from 'flowbite-svelte';
     
     let game = $state<Game>();
     let gameState = $state({ 
@@ -43,6 +44,7 @@
             // Initialize game state
             gameState.currentPlayer = game.getCurrentPlayer;
             gameState.phase = game.phase;
+            gameState.winner = game.getWinner;
         }
     });
 
@@ -68,6 +70,7 @@
             // Initialize game state
             gameState.currentPlayer = game.getCurrentPlayer;
             gameState.phase = game.phase;
+            gameState.winner = game.getWinner;
         }
     });
 
@@ -145,6 +148,25 @@
     const opponentName = $derived($gameSession.opponentId || 'Opponent');
     const myRole = $derived($gameSession.peerState?.role);
     const amIHost = $derived(myRole === 0); // PeerRole.Host = 0
+    
+    // Leave game modal state
+    let showLeaveGameModal = $state(false);
+    
+    function handleLeaveGame() {
+        if (isMultiplayer && !gameState.winner) {
+            // Show confirmation modal for active game
+            showLeaveGameModal = true;
+        } else {
+            // Game is over or demo mode, go back to lobby
+            goto('/');
+        }
+    }
+    
+    function confirmLeaveGame() {
+        // TODO: Send forfeit message to opponent
+        showLeaveGameModal = false;
+        goto('/');
+    }
 </script>
 
 <div class="container mx-auto p-4">
@@ -161,11 +183,27 @@
                     <span class="text-sm font-medium text-blue-800">Demo Mode</span>
                 </div>
             {/if}
+            <button 
+                class="inline-flex items-center px-3 py-1 text-sm font-medium text-red-700 bg-red-100 border border-red-300 rounded-lg hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors duration-200"
+                onclick={handleLeaveGame}>
+                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+                </svg>
+                {gameState.winner ? 'Return to Lobby' : 'Leave Game'}
+            </button>
         </div>
         
         {#if gameState.winner}
             <div class="text-2xl font-bold text-green-600">
-                🎉 {gameState.winner.name} Wins! 🎉
+                🎉 {#if isMultiplayer}
+                    {#if $gameSession.peerState?.role === 0}
+                        {gameState.winner.name === "X" ? "You Win" : `${opponentName} Wins`}!
+                    {:else}
+                        {gameState.winner.name === "O" ? "You Win" : `${opponentName} Wins`}!
+                    {/if}
+                {:else}
+                    {gameState.winner.name} Wins!
+                {/if} 🎉
             </div>
         {:else}
             <div class="text-lg">
@@ -215,4 +253,33 @@
             <NineGameBoard board={game.getBoard} game={(game as NinePeersMorris)} onCellClick={handleCellClick} />
         {/key}
     {/if}
+    
+    <!-- Leave Game Confirmation Modal -->
+    <Modal bind:open={showLeaveGameModal} title="Leave Game" onclose={() => showLeaveGameModal = false}>
+        <div class="text-center p-6">
+            <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg class="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L5.082 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+                </svg>
+            </div>
+            <h3 class="text-lg font-semibold text-gray-900 mb-2">Are you sure you want to leave?</h3>
+            <p class="text-gray-600 mb-6">
+                Leaving the game will count as a forfeit. <span class="font-medium">{opponentName}</span> will be declared the winner.
+            </p>
+            <div class="flex justify-center space-x-3">
+                <Button color="red" onclick={confirmLeaveGame}>
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+                    </svg>
+                    Yes, Leave Game
+                </Button>
+                <Button color="gray" onclick={() => showLeaveGameModal = false}>
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                    Cancel
+                </Button>
+            </div>
+        </div>
+    </Modal>
 </div>

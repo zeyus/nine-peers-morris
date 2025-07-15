@@ -262,6 +262,7 @@ export class Board implements Hashable {
         }
         const player = cell.piece.player;
         const cellsWithPlayerPiece = this.state.contiguousBreathFirstSearch(cell, c => (c.piece !== null && c.piece.player === player && (c.row === cell.row || c.col === cell.col)));
+        
         if (cellsWithPlayerPiece.length < this.millCount) {
             return false;
         }
@@ -269,7 +270,7 @@ export class Board implements Hashable {
         // i.e. there are three cells in a row or column
         const rowCells = cellsWithPlayerPiece.filter(c => c.row === cell.row);
         const colCells = cellsWithPlayerPiece.filter(c => c.col === cell.col);
-
+        
         return rowCells.length >= this.millCount || colCells.length >= this.millCount;        
     }
 
@@ -521,7 +522,7 @@ export class NinePeersMorris extends Game {
         return JSON.stringify({
             players: [this.players[0].dehydrate(), this.players[1].dehydrate()],
             currentPlayer: this.currentPlayer.id,
-            winner: this.winner,
+            winner: this.winner ? this.winner.id : null,
             turn: this.turn.valueOf()
         });
     }

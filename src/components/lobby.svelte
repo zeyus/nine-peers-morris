@@ -172,7 +172,7 @@
                 </div>
             </div>
 
-                <Modal title="Game Invitation" open={modalVisible} onclose={() => modalVisible = false} dismissable={false}>
+                <Modal title="Game Invitation" bind:open={modalVisible} onclose={() => modalVisible = false} dismissable={false}>
                     <div class="text-center p-6">
                         <div class="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
                             <svg class="w-8 h-8 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">

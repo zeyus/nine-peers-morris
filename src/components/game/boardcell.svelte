@@ -51,12 +51,12 @@
         return isMyTurn;
     });
 
+    const canPlayerMove = $derived(Boolean(game && game.phase === 'movement' && game.canMovePiece()));
     const isValidMove = $derived(Boolean(game && cell && game.validMoves.includes(cell) && isMyTurnInMultiplayer()));
     const isRemovable = $derived(Boolean(game && cell?.piece && game.removablePieces.includes(cell.piece) && isMyTurnInMultiplayer()));
     const isSelected = $derived(Boolean(game && cell?.piece && game.selectedPiece === cell.piece));
     const isValidPlacement = $derived(Boolean(game && cell && !cell.piece && game.phase === 'placement' && game.canPlacePiece() && isMyTurnInMultiplayer()));
-    const isMovablePiece = $derived(Boolean(game && cell?.piece && game.phase === 'movement' && cell.piece.player.id === game.getCurrentPlayer.id && canPlayerMove && isMyTurnInMultiplayer()));
-    const canPlayerMove = $derived(Boolean(game && game.phase === 'movement' && game.canMovePiece()));
+    const isMovablePiece = $derived(Boolean(game && cell?.piece && game.phase === 'movement' && cell.piece.player.id === game.getCurrentPlayer?.id && canPlayerMove && isMyTurnInMultiplayer()));
     
 </script>
 {#if cell}
