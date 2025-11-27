@@ -1125,7 +1125,7 @@ export class NinePeersMorris extends Game {
             }
             
             // Update current player and trigger reactive updates
-            this.currentPlayer = this.getOpponent(this.currentPlayer);
+            this.currentPlayer = this.getOpponent(this.players.find(p => p.id === move.playerId)!);
             this.turn.value = this.turn.valueOf() + 1;
             
             // Reset UI state
