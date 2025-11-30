@@ -1,7 +1,7 @@
 <script lang="ts">
-    import { Peer } from "$lib/peerjs/peer";
-    import { type DataConnection } from "$lib/peerjs/dataconnection/DataConnection";
-    import { util } from "$lib/peerjs/util";
+    import { Peer } from "../thirdparty/peerjs/peer";
+    import { type DataConnection } from "../thirdparty/peerjs/dataconnection/DataConnection";
+    import { util } from "../thirdparty/peerjs/util";
     import { randomName } from "$lib/utils";
     // import { getUUID } from '$lib/game/hashable';
     import { onMount } from 'svelte';
@@ -11,6 +11,7 @@
     import PeerList from '../components/peer-list.svelte';
     import { PeerCommands, GameHost, GameClient, PeerData, PeerRole, type PeerState } from "$lib/game/comms";
     import { goto } from '$app/navigation';
+    import { resolve } from '$app/paths';
     import { gameSession, gameSessionActions, persistedSessionData } from '$lib/game-state-store';
 
     let p: Peer | null = $state(null);
@@ -29,7 +30,7 @@
             if (age < SESSION_EXPIRY) {
                 console.log('Found persisted session, redirecting to board...');
                 // Navigate to board, which will handle restoration
-                goto('/board');
+                goto(resolve('/board'));
                 return;
             } else {
                 // Session expired, clear it
@@ -157,7 +158,8 @@
                         role.messageFromCommand(PeerCommands.PlayWithMe).then((msg) => dataConnection!.send(msg));
                     } else if (msg.command === PeerCommands.LetsPlay) {
                         console.log('accepted by', dataConnection!.metadata.clientName);
-                        goto('/board');
+                        goto(resolve('/board'));
+
                     } else if (msg.command === PeerCommands.NoThanks) {
                         console.log('rejected');
                     }
@@ -250,7 +252,7 @@
                                 console.log('accepting');
                                 role!.messageFromCommand(PeerCommands.LetsPlay).then((msg) => dataConnection!.send(msg));
                                 modalVisible = false;
-                                goto('/board');
+                                goto(resolve('/board'));
                             }}>
                                 <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>

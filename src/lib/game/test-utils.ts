@@ -3,22 +3,22 @@ import { vi } from 'vitest';
 /**
  * Creates a mock window object for testing game functionality
  */
-export function createMockWindow(): any {
-    return {
-        crypto: {
-            subtle: {
-                digest: vi.fn().mockResolvedValue(new ArrayBuffer(32))
-            }
-        }
-    };
+export function createMockWindow(): unknown {
+	return {
+		crypto: {
+			subtle: {
+				digest: vi.fn().mockResolvedValue(new ArrayBuffer(32))
+			}
+		}
+	};
 }
 
 /**
  * Mock implementations for hashable module
  */
 export const mockHashable = {
-    getHash: vi.fn().mockResolvedValue('mock-hash'),
-    getUUID: vi.fn().mockReturnValue('mock-uuid')
+	getHash: vi.fn().mockResolvedValue('mock-hash'),
+	getUUID: vi.fn().mockReturnValue('mock-uuid')
 };
 
 /**
@@ -26,5 +26,5 @@ export const mockHashable = {
  * Call this at the top of your test file
  */
 export function setupHashableMock() {
-    vi.mock('./hashable', () => mockHashable);
+	vi.mock('./hashable', () => mockHashable);
 }

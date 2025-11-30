@@ -7,11 +7,12 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<script>
 			// Apply theme immediately to prevent flash
-			(function() {
+			(function () {
 				const theme = localStorage.getItem('theme-preference');
 				const parsedTheme = theme ? JSON.parse(theme) : 'system';
 				const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-				const effectiveTheme = parsedTheme === 'system' ? (systemPrefersDark ? 'dark' : 'light') : parsedTheme;
+				const effectiveTheme =
+					parsedTheme === 'system' ? (systemPrefersDark ? 'dark' : 'light') : parsedTheme;
 
 				if (effectiveTheme === 'dark') {
 					document.documentElement.classList.add('dark');

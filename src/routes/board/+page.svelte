@@ -6,7 +6,8 @@
     import { peerConfig } from '$lib/persisted-store';
     import { goto } from '$app/navigation';
     import { Modal, Button, Alert } from 'flowbite-svelte';
-    import { GameHost, GameClient } from "$lib/game/comms";
+    import { GameHost, GameClient, PeerState } from "$lib/game/comms";
+      import { resolve } from '$app/paths';
     
     let game = $state<Game>();
     let gameState = $state({
@@ -50,7 +51,7 @@
                 // Subscribe to game state changes
                 if (game.getTurn) {
                     console.log('[EFFECT] Setting up turn subscription for game');
-                    turnUnsubscribe = game.getTurn.subscribe((newTurn) => {
+                    turnUnsubscribe = () => game ? game.getTurn.subscribe((newTurn) => {
                         console.log('[TURN SUBSCRIPTION] Callback fired! Turn:', newTurn, 'Game exists:', !!game);
                         if (game) {
                             // Force reactivity by reassigning the game state
@@ -72,7 +73,7 @@
                                 console.log('[PERSIST] Game state saved after turn', newTurn);
                             }
                         }
-                    });
+                    }) : () => {};
                 } else {
                     console.log('[EFFECT] Game.getTurn is not available');
                 }
@@ -96,7 +97,7 @@
                 console.log('Restoring game from persisted state...');
                 try {
                     // Import Peer and recreate connection
-                    const { Peer } = await import("$lib/peerjs/peer");
+                    const { Peer } = await import("../../thirdparty/peerjs/peer");
                     const { peerServerConf } = await import('$lib/peer-config');
 
                     // Create new peer with existing ID
@@ -111,9 +112,7 @@
                             console.log('Reconnected to opponent!');
 
                             // Recreate PeerState
-                            const role = persisted.role === 0 ?
-                                new GameHost(persisted.myPeerId!, persisted.opponentId!) :
-                                new GameClient(persisted.myPeerId!, persisted.opponentId!);
+                            let role: PeerState;
 
                             // Rehydrate game from persisted state
                             let restoredGame: Game | null = null;
@@ -122,21 +121,21 @@
                                     console.log('Rehydrating game from persisted state...');
                                     restoredGame = await NinePeersMorris.rehydrate(window, persisted.gameState);
                                     console.log('Game successfully rehydrated!');
-
-                                    // Attach the rehydrated game to the role
-                                    (role as any).game = restoredGame;
-
-                                    // Compute and set the current state hash from the rehydrated game
-                                    const currentHash = await restoredGame.getStateHash();
-                                    (role as any).lastStateHash = currentHash;
-                                    console.log('Computed current state hash after rehydration:', currentHash);
+                                    role = PeerState.rehydrate(persisted.peerState!, restoredGame);
                                 } catch (error) {
                                     console.error('Failed to rehydrate game:', error);
                                     // Fall back to creating a fresh game
-                                    role.startGame(window);
+                                            role = persisted.role === 0 ?
+                                        new GameHost(persisted.myPeerId!, persisted.opponentId!) :
+                                        new GameClient(persisted.myPeerId!, persisted.opponentId!);
+
+                                        role.startGame(window, restoredGame);
                                     restoredGame = role.getGame();
                                 }
                             } else {
+                                role = persisted.role === 0 ?
+                                    new GameHost(persisted.myPeerId!, persisted.opponentId!) :
+                                    new GameClient(persisted.myPeerId!, persisted.opponentId!);
                                 role.startGame(window);
                                 restoredGame = role.getGame();
                             }
@@ -334,7 +333,7 @@
         } else {
             // Game is over or demo mode, go back to lobby
             gameSessionActions.clearPersistedState();
-            goto('/');
+            goto(resolve('/'));
         }
     }
 
@@ -342,7 +341,7 @@
         // TODO: Send forfeit message to opponent
         gameSessionActions.clearPersistedState();
         showLeaveGameModal = false;
-        goto('/');
+        goto(resolve('/'));
     }
 
     // Monitor opponent disconnection
@@ -367,7 +366,7 @@
                     // Timeout reached - return to lobby
                     gameSessionActions.clearPersistedState();
                     gameSessionActions.clearGameSession();
-                    goto('/');
+                    goto(resolve('/'));
                 }
             }, 1000);
         } else if (reconnectionTimer) {

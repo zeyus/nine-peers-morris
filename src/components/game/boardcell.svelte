@@ -1,6 +1,5 @@
 <script lang="ts">
     import { type Cell, type NinePeersMorris } from "$lib/game/game";
-    import { type Graph } from "$lib/game/graph";
     import Piece from "./piece.svelte";
     import { gameSession } from "$lib/game-state-store";
     
@@ -25,9 +24,6 @@
             return true; // In demo mode, always allow interaction
         }
 
-        // Force fresh game state by accessing turn counter to trigger reactivity
-        const currentTurn = game.getTurn?.valueOf() || 0;
-
         // Use the same approach as the page - check role against current player name
         // This seems to be more reliable than checking player IDs
         const currentPlayer = game.getCurrentPlayer;
@@ -49,38 +45,6 @@
     const isSelected = $derived(Boolean(game && cell?.piece && game.selectedPiece === cell.piece && selectionVersion >= 0));
     const isValidPlacement = $derived(Boolean(game && cell && !cell.piece && game.phase === 'placement' && game.canPlacePiece() && isMyTurnInMultiplayer && selectionVersion >= 0));
     const isMovablePiece = $derived(Boolean(game && cell?.piece && game.phase === 'movement' && cell.piece.player.id === game.getCurrentPlayer?.id && canPlayerMove && isMyTurnInMultiplayer && selectionVersion >= 0));
-
-    // Debug log placement indicator logic
-    $effect(() => {
-        if (cell && !cell.piece && game?.phase === 'placement') {
-            const hasGame = !!game;
-            const hasCell = !!cell;
-            const isEmpty = !cell.piece;
-            const isPlacementPhase = game?.phase === 'placement';
-            const canPlace = game?.canPlacePiece() ?? false;
-            const myTurn = isMyTurnInMultiplayer;
-            const selVer = selectionVersion;
-            const gameIsMyTurn = game?.isMyTurn() ?? false;
-            const currentPlayerId = game?.getCurrentPlayer?.id;
-            const player0Id = game?.players?.[0]?.id;
-            const hasNextPiece = game?.getCurrentPlayer?.nextPiece !== null;
-
-            console.log(`[BOARDCELL ${cell.id}] Placement check:`, {
-                hasGame,
-                hasCell,
-                isEmpty,
-                isPlacementPhase,
-                canPlace,
-                myTurn,
-                gameIsMyTurn,
-                currentPlayerId,
-                player0Id,
-                hasNextPiece,
-                selVer,
-                isValidPlacement
-            });
-        }
-    });
     
 </script>
 {#if cell}

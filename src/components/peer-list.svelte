@@ -33,7 +33,7 @@
         </div>
     {:else}
         <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-            {#each peers as peer}
+            {#each peers as peer (peer)}
                 <Peer {peer} {onConnectRequest} />
             {/each}
         </div>

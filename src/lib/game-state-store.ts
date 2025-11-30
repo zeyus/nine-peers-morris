@@ -2,144 +2,155 @@ import { writable } from 'svelte/store';
 import { persisted } from 'svelte-persisted-store';
 import type { Game } from './game/game';
 import type { PeerState } from './game/comms';
-import type { DataConnection } from './peerjs/dataconnection/DataConnection';
+import type { DataConnection } from '../thirdparty/peerjs/dataconnection/DataConnection';
 
 export interface GameSession {
-    game: Game | null;
-    peerState: PeerState | null;
-    dataConnection: DataConnection | null;
-    isConnected: boolean;
-    opponentId: string | null;
-    opponentDisconnected: boolean;
-    disconnectedAt: number | null;
-    reconnectionTimeout: number;
+	game: Game | null;
+	peerState: PeerState | null;
+	dataConnection: DataConnection | null;
+	isConnected: boolean;
+	opponentId: string | null;
+	opponentDisconnected: boolean;
+	disconnectedAt: number | null;
+	reconnectionTimeout: number;
 }
 
 export interface PersistedSessionData {
-    gameState: string | null; // dehydrated game state
-    opponentId: string | null;
-    myPeerId: string | null;
-    role: number | null; // PeerRole enum value
-    lastStateHash: string | null;
-    timestamp: number;
-    isConnected: boolean;
+	gameState: string | null; // dehydrated game state
+	peerState: string | null; // dehydrated peer state
+	opponentId: string | null;
+	myPeerId: string | null;
+	role: number | null; // PeerRole enum value
+	lastStateHash: string | null;
+	timestamp: number;
+	isConnected: boolean;
 }
 
 const initialGameSession: GameSession = {
-    game: null,
-    peerState: null,
-    dataConnection: null,
-    isConnected: false,
-    opponentId: null,
-    opponentDisconnected: false,
-    disconnectedAt: null,
-    reconnectionTimeout: 60000 // 60 seconds
+	game: null,
+	peerState: null,
+	dataConnection: null,
+	isConnected: false,
+	opponentId: null,
+	opponentDisconnected: false,
+	disconnectedAt: null,
+	reconnectionTimeout: 60000 // 60 seconds
 };
 
 const initialPersistedData: PersistedSessionData = {
-    gameState: null,
-    opponentId: null,
-    myPeerId: null,
-    role: null,
-    lastStateHash: null,
-    timestamp: 0,
-    isConnected: false
+	gameState: null,
+	peerState: null,
+	opponentId: null,
+	myPeerId: null,
+	role: null,
+	lastStateHash: null,
+	timestamp: 0,
+	isConnected: false
 };
 
 export const gameSession = writable<GameSession>(initialGameSession);
-export const persistedSessionData = persisted<PersistedSessionData>('game-session', initialPersistedData);
+export const persistedSessionData = persisted<PersistedSessionData>(
+	'game-session',
+	initialPersistedData
+);
 
 export const gameSessionActions = {
-    setGameSession: (session: Partial<GameSession>) => {
-        gameSession.update(current => ({ ...current, ...session }));
-    },
-    
-    clearGameSession: () => {
-        gameSession.set(initialGameSession);
-    },
-    
-    updateGame: (game: Game) => {
-        gameSession.update(current => ({ ...current, game }));
-    },
-    
-    updatePeerState: (peerState: PeerState) => {
-        gameSession.update(current => ({ ...current, peerState }));
-    },
-    
-    setConnection: (dataConnection: DataConnection, opponentId: string) => {
-        gameSession.update(current => ({ 
-            ...current, 
-            dataConnection, 
-            opponentId,
-            isConnected: true 
-        }));
-    },
-    
-    disconnect: () => {
-        gameSession.update(current => ({
-            ...current,
-            dataConnection: null,
-            opponentId: null,
-            isConnected: false
-        }));
-    },
+	setGameSession: (session: Partial<GameSession>) => {
+		gameSession.update((current) => ({ ...current, ...session }));
+	},
 
-    markOpponentDisconnected: () => {
-        gameSession.update(current => ({
-            ...current,
-            opponentDisconnected: true,
-            disconnectedAt: Date.now(),
-            isConnected: false
-        }));
-    },
+	clearGameSession: () => {
+		gameSession.set(initialGameSession);
+	},
 
-    markOpponentReconnected: (dataConnection: DataConnection) => {
-        gameSession.update(current => ({
-            ...current,
-            opponentDisconnected: false,
-            disconnectedAt: null,
-            dataConnection,
-            isConnected: true
-        }));
-    },
+	updateGame: (game: Game) => {
+		gameSession.update((current) => ({ ...current, game }));
+	},
 
-    persistGameState: (game: Game | null, peerState: PeerState | null, myPeerId: string | null) => {
-        if (!game || !peerState || !myPeerId) {
-            persistedSessionData.set(initialPersistedData);
-            return;
-        }
+	updatePeerState: (peerState: PeerState) => {
+		gameSession.update((current) => ({ ...current, peerState }));
+	},
 
-        const dehydrated = game.dehydrate();
-        const parsed = JSON.parse(dehydrated);
+	setConnection: (dataConnection: DataConnection, opponentId: string) => {
+		gameSession.update((current) => ({
+			...current,
+			dataConnection,
+			opponentId,
+			isConnected: true
+		}));
+	},
 
-        // Log how many pieces are on the board
-        let pieceCount = 0;
-        if (parsed.board) {
-            const boardData = JSON.parse(parsed.board);
-            for (const vertexEntry of boardData) {
-                const cellData = JSON.parse(vertexEntry.vertex);
-                if (cellData.piece) {
-                    pieceCount++;
-                }
-            }
-        }
+	disconnect: () => {
+		gameSession.update((current) => ({
+			...current,
+			dataConnection: null,
+			opponentId: null,
+			isConnected: false
+		}));
+	},
 
-        console.log('[PERSIST] Saving game state with', pieceCount, 'pieces on board, turn:', parsed.turn);
+	markOpponentDisconnected: () => {
+		gameSession.update((current) => ({
+			...current,
+			opponentDisconnected: true,
+			disconnectedAt: Date.now(),
+			isConnected: false
+		}));
+	},
 
-        const data: PersistedSessionData = {
-            gameState: dehydrated,
-            opponentId: peerState.them,
-            myPeerId: myPeerId,
-            role: peerState.role,
-            lastStateHash: peerState.lastHash,
-            timestamp: Date.now(),
-            isConnected: true
-        };
+	markOpponentReconnected: (dataConnection: DataConnection) => {
+		gameSession.update((current) => ({
+			...current,
+			opponentDisconnected: false,
+			disconnectedAt: null,
+			dataConnection,
+			isConnected: true
+		}));
+	},
 
-        persistedSessionData.set(data);
-    },
+	persistGameState: (game: Game | null, peerState: PeerState | null, myPeerId: string | null) => {
+		if (!game || !peerState || !myPeerId) {
+			persistedSessionData.set(initialPersistedData);
+			return;
+		}
 
-    clearPersistedState: () => {
-        persistedSessionData.set(initialPersistedData);
-    }
+		const dehydrated = game.dehydrate();
+		const parsed = JSON.parse(dehydrated);
+
+		// Log how many pieces are on the board
+		let pieceCount = 0;
+		if (parsed.board) {
+			const boardData = JSON.parse(parsed.board);
+			for (const vertexEntry of boardData) {
+				const cellData = JSON.parse(vertexEntry.vertex);
+				if (cellData.piece) {
+					pieceCount++;
+				}
+			}
+		}
+
+		console.log(
+			'[PERSIST] Saving game state with',
+			pieceCount,
+			'pieces on board, turn:',
+			parsed.turn
+		);
+
+		const data: PersistedSessionData = {
+			gameState: dehydrated,
+			peerState: peerState.dehydrate(),
+			opponentId: peerState.them,
+			myPeerId: myPeerId,
+			role: peerState.role,
+			lastStateHash: peerState.lastHash,
+			timestamp: Date.now(),
+			isConnected: true
+		};
+
+		persistedSessionData.set(data);
+	},
+
+	clearPersistedState: () => {
+		persistedSessionData.set(initialPersistedData);
+	}
 };

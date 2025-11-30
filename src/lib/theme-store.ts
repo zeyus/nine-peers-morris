@@ -27,6 +27,6 @@ if (browser) {
 	const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
 	mediaQuery.addEventListener('change', () => {
 		// Trigger update when system theme changes
-		themePreference.update(val => val);
+		themePreference.update((val) => val);
 	});
 }
