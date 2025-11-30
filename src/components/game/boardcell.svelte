@@ -17,46 +17,70 @@
     }
 
     // Check if it's actually the local player's turn in multiplayer
-    const isMyTurnInMultiplayer = $derived(() => {
+    const isMyTurnInMultiplayer = $derived.by(() => {
         if (!game) return false;
-        
+
         const session = $gameSession;
         if (!session.isConnected || !session.peerState) {
             return true; // In demo mode, always allow interaction
         }
-        
+
         // Force fresh game state by accessing turn counter to trigger reactivity
         const currentTurn = game.getTurn?.valueOf() || 0;
-        
+
         // Use the same approach as the page - check role against current player name
         // This seems to be more reliable than checking player IDs
         const currentPlayer = game.getCurrentPlayer;
         if (!currentPlayer) return false;
-        
+
         const isMyTurn = (session.peerState.role === 0 && currentPlayer.name === "X") ||
                         (session.peerState.role === 1 && currentPlayer.name === "O");
-        
-        // Only log when turn changes or when it's my turn
-        if (isMyTurn || currentTurn !== (window as any).lastLoggedBoardTurn) {
-            console.log('Boardcell turn check:', {
-                myRole: session.peerState.role,
-                currentPlayerName: currentPlayer.name,
-                currentPlayerIsMe: isMyTurn,
-                gamePhase: game.phase,
-                gameTurn: currentTurn,
-                cellId: cell?.id
-            });
-            (window as any).lastLoggedBoardTurn = currentTurn;
-        }
+
         return isMyTurn;
     });
 
     const canPlayerMove = $derived(Boolean(game && game.phase === 'movement' && game.canMovePiece()));
-    const isValidMove = $derived(Boolean(game && cell && game.validMoves.includes(cell) && isMyTurnInMultiplayer()));
-    const isRemovable = $derived(Boolean(game && cell?.piece && game.removablePieces.includes(cell.piece) && isMyTurnInMultiplayer()));
-    const isSelected = $derived(Boolean(game && cell?.piece && game.selectedPiece === cell.piece));
-    const isValidPlacement = $derived(Boolean(game && cell && !cell.piece && game.phase === 'placement' && game.canPlacePiece() && isMyTurnInMultiplayer()));
-    const isMovablePiece = $derived(Boolean(game && cell?.piece && game.phase === 'movement' && cell.piece.player.id === game.getCurrentPlayer?.id && canPlayerMove && isMyTurnInMultiplayer()));
+
+    // Force reactivity by accessing selectionVersion
+    const selectionVersion = $derived(game?.selectionVersion ?? 0);
+
+    const isValidMove = $derived(Boolean(game && cell && game.validMoves.includes(cell) && isMyTurnInMultiplayer && selectionVersion >= 0));
+    const isRemovable = $derived(Boolean(game && cell?.piece && game.removablePieces.includes(cell.piece) && isMyTurnInMultiplayer && selectionVersion >= 0));
+    const isSelected = $derived(Boolean(game && cell?.piece && game.selectedPiece === cell.piece && selectionVersion >= 0));
+    const isValidPlacement = $derived(Boolean(game && cell && !cell.piece && game.phase === 'placement' && game.canPlacePiece() && isMyTurnInMultiplayer && selectionVersion >= 0));
+    const isMovablePiece = $derived(Boolean(game && cell?.piece && game.phase === 'movement' && cell.piece.player.id === game.getCurrentPlayer?.id && canPlayerMove && isMyTurnInMultiplayer && selectionVersion >= 0));
+
+    // Debug log placement indicator logic
+    $effect(() => {
+        if (cell && !cell.piece && game?.phase === 'placement') {
+            const hasGame = !!game;
+            const hasCell = !!cell;
+            const isEmpty = !cell.piece;
+            const isPlacementPhase = game?.phase === 'placement';
+            const canPlace = game?.canPlacePiece() ?? false;
+            const myTurn = isMyTurnInMultiplayer;
+            const selVer = selectionVersion;
+            const gameIsMyTurn = game?.isMyTurn() ?? false;
+            const currentPlayerId = game?.getCurrentPlayer?.id;
+            const player0Id = game?.players?.[0]?.id;
+            const hasNextPiece = game?.getCurrentPlayer?.nextPiece !== null;
+
+            console.log(`[BOARDCELL ${cell.id}] Placement check:`, {
+                hasGame,
+                hasCell,
+                isEmpty,
+                isPlacementPhase,
+                canPlace,
+                myTurn,
+                gameIsMyTurn,
+                currentPlayerId,
+                player0Id,
+                hasNextPiece,
+                selVer,
+                isValidPlacement
+            });
+        }
+    });
     
 </script>
 {#if cell}
@@ -77,16 +101,21 @@
 {/if}
         
         <!-- Cell indicator dot -->
-        <div 
+        <div
             class="absolute top-50% mt-[1vw] ml-[1vw] rounded-full size-[2vw] z-5 border-[0.5vw] transition-all duration-200"
             class:bg-purple-900={!isValidMove && !isRemovable && !isValidPlacement && !isMovablePiece}
             class:border-pink-400={!isValidMove && !isRemovable && !isValidPlacement && !isMovablePiece}
-            class:bg-green-500={isValidMove || isValidPlacement}
-            class:border-green-300={isValidMove || isValidPlacement}
+            class:bg-green-400={isValidMove || isValidPlacement}
+            class:border-green-200={isValidMove || isValidPlacement}
             class:motion-safe:animate-pulse={isValidMove || isValidPlacement}
-            class:bg-blue-500={isMovablePiece && canPlayerMove}
-            class:border-blue-300={isMovablePiece && canPlayerMove}
-            class:motion-safe:animate-bounce={isMovablePiece && canPlayerMove}
+            class:shadow-lg={isValidMove || isValidPlacement}
+            class:shadow-green-400={isValidMove || isValidPlacement}
+            class:scale-125={isValidMove || isValidPlacement}
+            class:bg-yellow-400={isMovablePiece && canPlayerMove && !isSelected}
+            class:border-yellow-200={isMovablePiece && canPlayerMove && !isSelected}
+            class:motion-safe:animate-bounce={isMovablePiece && canPlayerMove && !isSelected}
+            class:shadow-md={isMovablePiece && canPlayerMove}
+            class:shadow-yellow-300={isMovablePiece && canPlayerMove}
             class:bg-red-500={isRemovable}
             class:border-red-300={isRemovable}
             class:motion-safe:animate-ping={isRemovable}

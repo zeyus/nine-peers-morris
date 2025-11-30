@@ -1,11 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NinePeersMorris, Player, GamePhase, GameAction } from './game';
+import { createMockWindow, setupHashableMock } from './test-utils';
 
-// Mock the getHash function
-vi.mock('./hashable', () => ({
-    getHash: vi.fn().mockResolvedValue('mock-hash'),
-    getUUID: vi.fn().mockReturnValue('mock-uuid')
-}));
+setupHashableMock();
 
 describe('NinePeersMorris', () => {
     let game: NinePeersMorris;
@@ -16,15 +13,7 @@ describe('NinePeersMorris', () => {
     beforeEach(() => {
         player1 = new Player('p1', 'Player 1', true);
         player2 = new Player('p2', 'Player 2', false);
-        
-        mockWindow = {
-            crypto: {
-                subtle: {
-                    digest: vi.fn().mockResolvedValue(new ArrayBuffer(32))
-                }
-            }
-        };
-        
+        mockWindow = createMockWindow();
         game = new NinePeersMorris(mockWindow, player1, player2);
     });
 

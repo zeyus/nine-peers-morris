@@ -16,12 +16,15 @@
     class:via-orange-500={piece.player.name === "O"}
     class:to-amber-900={piece.player.name === "O"}
     class:border-gray-300={!isSelected && !isRemovable}
-    class:border-blue-500={isSelected}
+    class:border-yellow-400={isSelected}
     class:border-red-500={isRemovable}
-    class:ring-2={isSelected || isRemovable}
-    class:ring-blue-400={isSelected}
+    class:ring-4={isSelected || isRemovable}
+    class:ring-yellow-300={isSelected}
     class:ring-red-400={isRemovable}
     class:motion-safe:animate-pulse={isSelected}
     class:motion-safe:animate-bounce={isRemovable}
+    class:shadow-lg={isSelected}
+    class:shadow-yellow-400={isSelected}
+    class:scale-110={isSelected}
     >
 </div>

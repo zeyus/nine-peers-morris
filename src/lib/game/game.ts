@@ -97,7 +97,8 @@ export class Player implements Hashable {
             id: this.id,
             name: this.name,
             pieces: this.pieces.map(piece => piece.dehydrate()),
-            isWinner: this.isWinner
+            isWinner: this.isWinner,
+            isInitiator: this.isInitiator
         });
     }
 }
@@ -134,7 +135,7 @@ export class Cell implements Hashable {
             id: this.id,
             row: this.row,
             col: this.col,
-            piece: this.piece
+            piece: this.piece ? this.piece.dehydrate() : null
         });
     }
 }
@@ -407,6 +408,8 @@ export abstract class Game implements Hashable {
     protected gameStateHash: GameStateHash;
     public validMoves: readonly Cell[] = [];
     public phase: GamePhase;
+    public abstract get selectionVersion(): number;
+    public abstract selectedPiece: GamePiece | null;
 
     constructor(me: Player, them: Player, board: Board) {
         if (me === them) {
@@ -500,8 +503,13 @@ export class NinePeersMorris extends Game {
     private ready: boolean;
     public selectedPiece: GamePiece | null = null;
     public selectedCell: Cell | null = null;
-    
-    
+
+    // Reactive counter to trigger UI updates when selection changes
+    private _selectionVersion = 0;
+    public get selectionVersion(): number {
+        return this._selectionVersion;
+    }
+
     public removablePieces: readonly GamePiece[] = [];
 
     /**
@@ -523,8 +531,90 @@ export class NinePeersMorris extends Game {
             players: [this.players[0].dehydrate(), this.players[1].dehydrate()],
             currentPlayer: this.currentPlayer.id,
             winner: this.winner ? this.winner.id : null,
-            turn: this.turn.valueOf()
+            turn: this.turn.valueOf(),
+            board: this.board.state.dehydrate(),
+            phase: this.phase
         });
+    }
+
+    /**
+     * Restores a game from dehydrated state
+     */
+    static async rehydrate(win: Window, dehydratedState: string): Promise<NinePeersMorris> {
+        const data = JSON.parse(dehydratedState);
+
+        // Parse player data
+        const p1Data = JSON.parse(data.players[0]);
+        const p2Data = JSON.parse(data.players[1]);
+
+        // Create players
+        const player1 = new Player(p1Data.id, p1Data.name, p1Data.isInitiator !== undefined ? p1Data.isInitiator : true);
+        const player2 = new Player(p2Data.id, p2Data.name, p2Data.isInitiator !== undefined ? p2Data.isInitiator : false);
+
+        // Create new game
+        const game = new NinePeersMorris(win, player1, player2);
+
+        // Restore board state
+        if (data.board) {
+            const boardData = JSON.parse(data.board);
+            console.log('[REHYDRATE] Starting board restoration, vertices:', boardData.length);
+            // The board data is an array of vertices from the graph
+            // Each vertex is a Cell with its dehydrated data
+            for (const vertexEntry of boardData) {
+                const cellData = JSON.parse(vertexEntry.vertex);
+                if (cellData.piece) {
+                    console.log('[REHYDRATE] Found piece on cell', cellData.id);
+                    const cell = game.board.getCell(cellData.id);
+                    const pieceData = JSON.parse(cellData.piece);
+                    console.log('[REHYDRATE] Piece data:', pieceData);
+
+                    // Find which player owns this piece
+                    const owner = pieceData.player === player1.id ? player1 : player2;
+                    console.log('[REHYDRATE] Owner:', owner.id, 'unplaced pieces:', owner.unplacedPieces.length);
+
+                    // The game already created 9 pieces for each player in the constructor
+                    // We just need to find an unplaced piece and place it
+                    const piece = owner.unplacedPieces[0] || owner.allPieces[0];
+
+                    if (piece && pieceData.state === 'placed' && pieceData.cell === cell.id) {
+                        console.log('[REHYDRATE] Placing piece on cell', cell.id);
+                        game.board.placePiece(piece, cell);
+                        console.log('[REHYDRATE] Cell now has piece:', !!cell.piece);
+                    } else {
+                        console.log('[REHYDRATE] NOT placing piece. piece:', !!piece, 'state:', pieceData.state, 'cellMatch:', pieceData.cell === cell.id);
+                    }
+                }
+            }
+            console.log('[REHYDRATE] Board restoration complete');
+        }
+
+        // Restore current player
+        game.currentPlayer = data.currentPlayer === player1.id ? player1 : player2;
+
+        // Restore winner if any
+        if (data.winner) {
+            game.winner = data.winner === player1.id ? player1 : player2;
+        }
+
+        // Restore game phase
+        if (data.phase) {
+            game.phase = data.phase;
+        }
+
+        // Initialize game state hash for current turn BEFORE setting turn value
+        game.ready = true;
+        await game.getStateHash().then(hash => {
+            game._addHash(hash, data.turn || 0);
+            game.ready = true;
+        });
+
+        // Restore turn counter AFTER hash is computed
+        // We override valueOf directly to avoid triggering subscribers
+        if (data.turn !== undefined) {
+            game.turn.valueOf = () => data.turn;
+        }
+
+        return game;
     }
 
     private onTurnChange(newTurn: number) {
@@ -636,11 +726,23 @@ export class NinePeersMorris extends Game {
         // Same as handleMovementClick but without the canMovePiece() check
         if (this.phase !== GamePhase.Movement) return null;
 
-        // If clicking on own piece, select it
+        // If clicking on own piece, toggle selection
         if (cell.piece && cell.piece.player.id === this.currentPlayer.id) {
+            // If clicking the same piece, deselect it
+            if (this.selectedPiece === cell.piece) {
+                this.selectedPiece = null;
+                this.selectedCell = null;
+                this.validMoves = Object.freeze([]);
+                this._selectionVersion++;
+                console.log('Deselected piece (forced)');
+                return null;
+            }
+
+            // Otherwise, select the new piece
             this.selectedPiece = cell.piece;
             this.selectedCell = cell;
             this.validMoves = this.getValidMoves(cell.piece);
+            this._selectionVersion++;
             console.log('Selected piece for movement (forced):', {
                 pieceId: cell.piece.id,
                 cellId: cell.id,
@@ -698,6 +800,7 @@ export class NinePeersMorris extends Game {
             this.selectedPiece = null;
             this.selectedCell = null;
             this.validMoves = Object.freeze([]);
+            this._selectionVersion++;
         }
 
         return null;
@@ -775,11 +878,23 @@ export class NinePeersMorris extends Game {
     private handleMovementClick(cell: Cell): GameMove | null {
         if (!this.canMovePiece()) return null;
 
-        // If clicking on own piece, select it
+        // If clicking on own piece, toggle selection
         if (cell.piece && cell.piece.player.id === this.currentPlayer.id) {
+            // If clicking the same piece, deselect it
+            if (this.selectedPiece === cell.piece) {
+                this.selectedPiece = null;
+                this.selectedCell = null;
+                this.validMoves = Object.freeze([]);
+                this._selectionVersion++;
+                console.log('Deselected piece');
+                return null;
+            }
+
+            // Otherwise, select the new piece
             this.selectedPiece = cell.piece;
             this.selectedCell = cell;
             this.validMoves = this.getValidMoves(cell.piece);
+            this._selectionVersion++;
             console.log('Selected piece for movement:', {
                 pieceId: cell.piece.id,
                 cellId: cell.id,
@@ -837,6 +952,7 @@ export class NinePeersMorris extends Game {
             this.selectedPiece = null;
             this.selectedCell = null;
             this.validMoves = Object.freeze([]);
+            this._selectionVersion++;
         }
 
         return null;

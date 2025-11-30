@@ -24,6 +24,8 @@ export const enum PeerCommands {
     GameOver = 'GAME_OVER',
     Move = 'MOVE',
     MoveAck = 'MOVE_ACK',
+    SyncRequest = 'SYNC_REQUEST',
+    SyncResponse = 'SYNC_RESPONSE',
 }
 
 
@@ -120,20 +122,28 @@ export abstract class PeerState {
             throw new Error('Hash mismatch');
         }
         
-        if (msg.command === PeerCommands.Move) {
+        if (msg.command === PeerCommands.SyncRequest) {
+            // Opponent is requesting current game state (reconnection scenario)
+            console.log('Received sync request from opponent');
+            // Will be handled by the component to send back game state
+        } else if (msg.command === PeerCommands.SyncResponse) {
+            // Received game state from opponent after reconnection
+            console.log('Received sync response with game state');
+            // Will be handled by the component to restore game state
+        } else if (msg.command === PeerCommands.Move) {
             // Opponent made a move, apply it to our game
             if (this.game && msg.data) {
                 try {
                     const moveData = JSON.parse(msg.data);
                     console.log('Received move from opponent:', moveData);
-                    
+
                     // Apply the move to our game instance
                     const success = this.game.applyMove(moveData);
                     if (success) {
                         // Update our state hash to reflect the new game state
                         this.lastStateHash = await this.game.getStateHash();
                         console.log('Move applied successfully, new hash:', this.lastStateHash);
-                        
+
                         // Force a reactive update by triggering the turn counter
                         // This ensures Svelte detects the game state change
                         if (this.game.getTurn) {

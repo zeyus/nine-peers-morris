@@ -1,54 +1,215 @@
 <script lang="ts">
     import NineGameBoard from "../../components/game/ninegameboard.svelte";
-    import { NineBoard, Player, NinePeersMorris, GamePhase, type Cell, type Game } from "$lib/game/game";
-    import { onMount } from "svelte";
-    import { gameSession } from "$lib/game-state-store";
+    import { Player, NinePeersMorris, GamePhase, type Cell, type Game } from "$lib/game/game";
+    import { onMount, onDestroy } from "svelte";
+    import { gameSession, gameSessionActions, persistedSessionData } from "$lib/game-state-store";
+    import { peerConfig } from '$lib/persisted-store';
     import { goto } from '$app/navigation';
-    import { Modal, Button } from 'flowbite-svelte';
+    import { Modal, Button, Alert } from 'flowbite-svelte';
+    import { GameHost, GameClient } from "$lib/game/comms";
     
     let game = $state<Game>();
-    let gameState = $state({ 
-        phase: GamePhase.Placement, 
+    let gameState = $state({
+        phase: GamePhase.Placement,
         currentPlayer: null as Player | null,
         turn: 0,
         winner: null as Player | null
     });
     let session = $state(gameSession);
+    let selectionKey = $state(0); // Track selection changes for reactivity
+    let refreshKey = $state(0); // Force board refresh
+    let turnUnsubscribe: (() => void) | null = null; // Track subscription cleanup
+
     // Make the session reactive so the board updates when peers connect
     $effect(() => {
-        
-        console.log('Game session updated:', session);
-        
+        console.log('[EFFECT] Game session updated:', $session);
+
         if ($session.game && $session.isConnected) {
-            // Use the peer-connected game
-            game = $session.game;
-            console.log('Using peer game session with opponent:', $session.opponentId);
-            
-            // Subscribe to game state changes if not already subscribed
-            if (game.getTurn) {
-                game.getTurn.subscribe((newTurn) => {
-                    if (game) {
-                        // Force reactivity by reassigning the game state
-                        gameState = { 
-                            turn: newTurn,
-                            currentPlayer: game.getCurrentPlayer,
-                            phase: game.phase,
-                            winner: game.getWinner
-                        };
-                        // Force board reactivity by reassigning the game reference
-                        game = game;
+            // Only set up subscription if we haven't already or if the game changed
+            if (game !== $session.game) {
+                // Clean up old subscription
+                if (turnUnsubscribe) {
+                    console.log('[EFFECT] Cleaning up old turn subscription');
+                    turnUnsubscribe();
+                    turnUnsubscribe = null;
+                }
+
+                // Use the peer-connected game
+                game = $session.game;
+                console.log('[EFFECT] Using peer game session with opponent:', $session.opponentId);
+                console.log('[EFFECT] Game has pieces on board:', game.getBoard.state.size);
+
+                // Log board state
+                for (let i = 0; i < 24; i++) {
+                    const cell = game.getBoard.getCell(i);
+                    if (cell.piece) {
+                        console.log('[EFFECT] Cell', i, 'has piece from player', cell.piece.player.id);
                     }
-                });
+                }
+
+                // Subscribe to game state changes
+                if (game.getTurn) {
+                    console.log('[EFFECT] Setting up turn subscription for game');
+                    turnUnsubscribe = game.getTurn.subscribe((newTurn) => {
+                        console.log('[TURN SUBSCRIPTION] Callback fired! Turn:', newTurn, 'Game exists:', !!game);
+                        if (game) {
+                            // Force reactivity by reassigning the game state
+                            gameState = {
+                                turn: newTurn,
+                                currentPlayer: game.getCurrentPlayer,
+                                phase: game.phase,
+                                winner: game.getWinner
+                            };
+
+                            // Increment refresh key to force board re-render
+                            refreshKey++;
+                            console.log('[TURN SUBSCRIPTION] Updated turn to', newTurn, ', refreshKey:', refreshKey);
+
+                            // Persist game state after every turn
+                            const currentSession = $gameSession;
+                            if (currentSession.peerState && currentSession.isConnected) {
+                                gameSessionActions.persistGameState(game, currentSession.peerState, $peerConfig.pId);
+                                console.log('[PERSIST] Game state saved after turn', newTurn);
+                            }
+                        }
+                    });
+                } else {
+                    console.log('[EFFECT] Game.getTurn is not available');
+                }
+
+                // Initialize game state
+                gameState.currentPlayer = game.getCurrentPlayer;
+                gameState.phase = game.phase;
+                gameState.winner = game.getWinner;
             }
-            
-            // Initialize game state
-            gameState.currentPlayer = game.getCurrentPlayer;
-            gameState.phase = game.phase;
-            gameState.winner = game.getWinner;
         }
     });
 
-    onMount(() => {
+    onMount(async () => {
+        // Check for persisted session first (after page refresh)
+        const persisted = $persistedSessionData;
+        const SESSION_EXPIRY = 5 * 60 * 1000; // 5 minutes
+
+        if (persisted && persisted.gameState && persisted.timestamp) {
+            const age = Date.now() - persisted.timestamp;
+            if (age < SESSION_EXPIRY && persisted.opponentId && persisted.myPeerId) {
+                console.log('Restoring game from persisted state...');
+                try {
+                    // Import Peer and recreate connection
+                    const { Peer } = await import("$lib/peerjs/peer");
+                    const { peerServerConf } = await import('$lib/peer-config');
+
+                    // Create new peer with existing ID
+                    const p = new Peer(persisted.myPeerId, peerServerConf);
+
+                    p.on('open', () => {
+                        console.log('Peer reconnected, attempting to reconnect to opponent...');
+                        // Try to reconnect to opponent
+                        const conn = p.connect(persisted.opponentId!);
+
+                        conn.on('open', async () => {
+                            console.log('Reconnected to opponent!');
+
+                            // Recreate PeerState
+                            const role = persisted.role === 0 ?
+                                new GameHost(persisted.myPeerId!, persisted.opponentId!) :
+                                new GameClient(persisted.myPeerId!, persisted.opponentId!);
+
+                            // Rehydrate game from persisted state
+                            let restoredGame: Game | null = null;
+                            if (persisted.gameState) {
+                                try {
+                                    console.log('Rehydrating game from persisted state...');
+                                    restoredGame = await NinePeersMorris.rehydrate(window, persisted.gameState);
+                                    console.log('Game successfully rehydrated!');
+
+                                    // Attach the rehydrated game to the role
+                                    (role as any).game = restoredGame;
+
+                                    // Compute and set the current state hash from the rehydrated game
+                                    const currentHash = await restoredGame.getStateHash();
+                                    (role as any).lastStateHash = currentHash;
+                                    console.log('Computed current state hash after rehydration:', currentHash);
+                                } catch (error) {
+                                    console.error('Failed to rehydrate game:', error);
+                                    // Fall back to creating a fresh game
+                                    role.startGame(window);
+                                    restoredGame = role.getGame();
+                                }
+                            } else {
+                                role.startGame(window);
+                                restoredGame = role.getGame();
+                            }
+
+                            gameSessionActions.setGameSession({
+                                peerState: role,
+                                dataConnection: conn,
+                                opponentId: persisted.opponentId,
+                                game: restoredGame,
+                                isConnected: true
+                            });
+
+                            if (restoredGame) {
+                                game = restoredGame;
+                                console.log('Game restored successfully!');
+                                console.log('Restored game turn:', restoredGame.getTurn.valueOf());
+                                console.log('Restored game current player:', restoredGame.getCurrentPlayer.id);
+                                console.log('Restored game phase:', restoredGame.phase);
+
+                                // Initialize gameState from restored game
+                                gameState = {
+                                    turn: restoredGame.getTurn.valueOf(),
+                                    currentPlayer: restoredGame.getCurrentPlayer,
+                                    phase: restoredGame.phase,
+                                    winner: restoredGame.getWinner
+                                };
+                            }
+                        });
+
+                        // Set up data handler to receive moves from opponent
+                        conn.on('data', async (data) => {
+                            console.log('[RECONNECT] Received data from opponent:', data);
+                            const session = $gameSession;
+                            if (session.peerState) {
+                                const { PeerData } = await import('$lib/game/comms');
+                                const msg = PeerData.dataToPeerMessage(data as string);
+                                console.log('[RECONNECT] Processing message:', msg);
+                                await session.peerState.handleMessage(msg);
+
+                                // Force game update to trigger reactivity
+                                if (session.game) {
+                                    game = session.game;
+                                    gameState = {
+                                        turn: session.game.getTurn.valueOf(),
+                                        currentPlayer: session.game.getCurrentPlayer,
+                                        phase: session.game.phase,
+                                        winner: session.game.getWinner
+                                    };
+                                }
+                            }
+                        });
+
+                        conn.on('close', () => {
+                            gameSessionActions.markOpponentDisconnected();
+                        });
+
+                        conn.on('error', (err) => {
+                            console.error('Reconnection failed:', err);
+                            gameSessionActions.markOpponentDisconnected();
+                        });
+                    });
+
+                    return; // Exit early after attempting restoration
+                } catch (error) {
+                    console.error('Failed to restore game:', error);
+                    gameSessionActions.clearPersistedState();
+                }
+            } else {
+                // Session expired
+                gameSessionActions.clearPersistedState();
+            }
+        }
+
         // Only create demo game if no peer session exists
         const session = $gameSession;
         if (!session.game || !session.isConnected) {
@@ -56,7 +217,7 @@
             const p1 = new Player("Player 1", "X", true);
             const p2 = new Player("Player 2", "O", false);
             game = new NinePeersMorris(window, p1, p2);
-            
+
             // Subscribe to game state changes
             game.getTurn.subscribe((newTurn) => {
                 if (game) {
@@ -64,9 +225,16 @@
                     gameState.currentPlayer = game.getCurrentPlayer;
                     gameState.phase = game.phase;
                     gameState.winner = game.getWinner;
+
+                    // Persist game state (demo mode shouldn't need it, but keep for consistency)
+                    const currentSession = $gameSession;
+                    if (currentSession.peerState && currentSession.isConnected) {
+                        gameSessionActions.persistGameState(game, currentSession.peerState, $peerConfig.pId);
+                        console.log('[PERSIST] Game state saved after turn', newTurn);
+                    }
                 }
             });
-            
+
             // Initialize game state
             gameState.currentPlayer = game.getCurrentPlayer;
             gameState.phase = game.phase;
@@ -106,26 +274,31 @@
             canPlacePiece: game?.canPlacePiece?.()
         });
         
-        const move = session.isConnected ? 
+        const move = session.isConnected ?
             game.handleCellClickForced(cell) : // Use a forced version that bypasses turn check
             game.handleCellClick(cell);
+
+        // Update selection key to trigger reactivity
+        selectionKey = game.selectionVersion;
+        console.log('[SELECTION] Updated selectionKey to:', selectionKey, 'selectedPiece:', game.selectedPiece?.id);
+
         if (move) {
             console.log('Move made:', move);
-            
+
             // Force gameState update to trigger reactivity
-            gameState = { 
+            gameState = {
                 turn: game.getTurn.valueOf(),
                 currentPlayer: game.getCurrentPlayer,
                 phase: game.phase,
                 winner: game.getWinner
             };
-            
+
             // Send move to opponent if in multiplayer
             if (session.isConnected && session.peerState && session.dataConnection) {
                 session.peerState.sendMove(move).then(async msg => {
                     console.log('Sending move to opponent:', move);
                     session.dataConnection!.send(msg);
-                    
+
                     // Update our own state hash after sending the move
                     if (session.peerState!.getGame()) {
                         await session.peerState!.updateStateHash();
@@ -146,30 +319,138 @@
     // Show if we're in multiplayer mode
     const isMultiplayer = $derived($gameSession.isConnected);
     const opponentName = $derived($gameSession.opponentId || 'Opponent');
-    const myRole = $derived($gameSession.peerState?.role);
-    const amIHost = $derived(myRole === 0); // PeerRole.Host = 0
     
     // Leave game modal state
     let showLeaveGameModal = $state(false);
-    
+
+    // Disconnection monitoring
+    let reconnectionTimer: number | null = null;
+    let remainingReconnectTime = $state(60);
+
     function handleLeaveGame() {
         if (isMultiplayer && !gameState.winner) {
             // Show confirmation modal for active game
             showLeaveGameModal = true;
         } else {
             // Game is over or demo mode, go back to lobby
+            gameSessionActions.clearPersistedState();
             goto('/');
         }
     }
-    
+
     function confirmLeaveGame() {
         // TODO: Send forfeit message to opponent
+        gameSessionActions.clearPersistedState();
         showLeaveGameModal = false;
         goto('/');
     }
+
+    // Monitor opponent disconnection
+    $effect(() => {
+        if ($session.opponentDisconnected && $session.disconnectedAt) {
+            const elapsed = Date.now() - $session.disconnectedAt;
+            const remaining = Math.max(0, Math.ceil(($session.reconnectionTimeout - elapsed) / 1000));
+            remainingReconnectTime = remaining;
+
+            if (reconnectionTimer) {
+                clearInterval(reconnectionTimer);
+            }
+
+            reconnectionTimer = window.setInterval(() => {
+                const elapsed = Date.now() - $session.disconnectedAt!;
+                const remaining = Math.max(0, Math.ceil(($session.reconnectionTimeout - elapsed) / 1000));
+                remainingReconnectTime = remaining;
+
+                if (remaining === 0) {
+                    clearInterval(reconnectionTimer!);
+                    reconnectionTimer = null;
+                    // Timeout reached - return to lobby
+                    gameSessionActions.clearPersistedState();
+                    gameSessionActions.clearGameSession();
+                    goto('/');
+                }
+            }, 1000);
+        } else if (reconnectionTimer) {
+            clearInterval(reconnectionTimer);
+            reconnectionTimer = null;
+        }
+    });
+
+    // Persist game state after every move
+    $effect(() => {
+        if (game && $session.peerState && $session.isConnected) {
+            gameSessionActions.persistGameState(game, $session.peerState, $peerConfig.pId);
+        }
+    });
+
+    // Watch for turn changes to keep gameState in sync
+    $effect(() => {
+        if ($session.game && $session.isConnected) {
+            const currentTurn = $session.game.getTurn.valueOf();
+            const currentPhase = $session.game.phase;
+            const currentPlayer = $session.game.getCurrentPlayer;
+
+            console.log('[EFFECT] Session game state:', {
+                turn: currentTurn,
+                phase: currentPhase,
+                currentPlayerName: currentPlayer?.name,
+                localTurn: gameState.turn,
+                localPhase: gameState.phase,
+                turnMismatch: gameState.turn !== currentTurn,
+                phaseMismatch: gameState.phase !== currentPhase,
+                needsSync: gameState.turn !== currentTurn || gameState.phase !== currentPhase
+            });
+
+            // Only update if the turn or phase actually changed
+            if (gameState.turn !== currentTurn || gameState.phase !== currentPhase) {
+                console.log('[EFFECT] Turn/phase changed, updating gameState and refreshKey');
+                gameState = {
+                    turn: currentTurn,
+                    currentPlayer: currentPlayer,
+                    phase: currentPhase,
+                    winner: $session.game.getWinner
+                };
+
+                // Force board refresh
+                refreshKey++;
+                console.log('[EFFECT] Incremented refreshKey to:', refreshKey);
+            }
+        }
+    });
+
+    onDestroy(() => {
+        if (reconnectionTimer) {
+            clearInterval(reconnectionTimer);
+        }
+    });
 </script>
 
 <div class="container mx-auto p-4">
+    <!-- Opponent Disconnected Alert -->
+    {#if $session.opponentDisconnected && remainingReconnectTime > 0}
+        <Alert color="yellow" class="mb-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                    <svg class="w-5 h-5 animate-pulse" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                    </svg>
+                    <span class="font-semibold">{opponentName} has disconnected</span>
+                </div>
+                <span class="text-sm">Waiting for reconnection: {remainingReconnectTime}s</span>
+            </div>
+        </Alert>
+    {:else if isMultiplayer && !$session.opponentDisconnected && $session.isConnected}
+        <!-- Show reconnected message briefly after reconnection -->
+        <Alert color="green" class="mb-4" dismissable>
+            <div class="flex items-center space-x-2">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                </svg>
+                <span class="font-semibold text-black">Connection restored with {opponentName}</span>
+            </div>
+        </Alert>
+    {/if}
+
     <div class="mb-4 text-center">
         <div class="flex items-center justify-center space-x-4 mb-2">
             <h1 class="text-3xl font-bold">Nine Men's Morris</h1>
@@ -249,7 +530,7 @@
     </div>
     
     {#if game}
-        {#key `${gameState.turn}-${gameState.phase}`}
+        {#key `${gameState.turn}-${gameState.phase}-${selectionKey}-${refreshKey}`}
             <NineGameBoard board={game.getBoard} game={(game as NinePeersMorris)} onCellClick={handleCellClick} />
         {/key}
     {/if}
@@ -262,8 +543,8 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L5.082 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
                 </svg>
             </div>
-            <h3 class="text-lg font-semibold text-gray-900 mb-2">Are you sure you want to leave?</h3>
-            <p class="text-gray-600 mb-6">
+            <h3 class="text-lg font-semibold dark:text-gray-100 text-gray-900 mb-2">Are you sure you want to leave?</h3>
+            <p class="text-gray-600 dark:text-gray-400 mb-6">
                 Leaving the game will count as a forfeit. <span class="font-medium">{opponentName}</span> will be declared the winner.
             </p>
             <div class="flex justify-center space-x-3">

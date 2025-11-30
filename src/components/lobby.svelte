@@ -11,7 +11,7 @@
     import PeerList from '../components/peer-list.svelte';
     import { PeerCommands, GameHost, GameClient, PeerData, PeerRole, type PeerState } from "$lib/game/comms";
     import { goto } from '$app/navigation';
-    import { gameSessionActions } from '$lib/game-state-store';
+    import { gameSession, gameSessionActions, persistedSessionData } from '$lib/game-state-store';
 
     let p: Peer | null = $state(null);
     let supported: boolean | null = $state(null);
@@ -21,10 +21,26 @@
     // let metadata: any = $state(null);
 
     onMount(() => {
+        // Check for persisted session and navigate to board if exists
+        const persisted = $persistedSessionData;
+        const SESSION_EXPIRY = 5 * 60 * 1000; // 5 minutes
+        if (persisted && persisted.gameState && persisted.timestamp) {
+            const age = Date.now() - persisted.timestamp;
+            if (age < SESSION_EXPIRY) {
+                console.log('Found persisted session, redirecting to board...');
+                // Navigate to board, which will handle restoration
+                goto('/board');
+                return;
+            } else {
+                // Session expired, clear it
+                gameSessionActions.clearPersistedState();
+            }
+        }
+
         if (!util.supports.data) {
             supported = false;
             return;
-        } 
+        }
         supported = true;
         if (!$peerConfig.pId) {
             // peerConfig.set({ pId: getUUID(window) });
@@ -55,6 +71,8 @@
                         game: role.getGame(),
                         isConnected: true
                     });
+                    // Persist game state
+                    gameSessionActions.persistGameState(role.getGame(), role, $peerConfig.pId);
                 }
                 const msg = PeerData.dataToPeerMessage(data as string);
                 console.log(msg);
@@ -70,9 +88,30 @@
                         console.log('CLIENT: modalVisible is now:', modalVisible);
                     }
                 }
-                
+
                 console.log('receiving data');
                 console.log(data);
+            });
+
+            dataConnection?.on('close', () => {
+                console.log('Connection closed by peer');
+                gameSessionActions.markOpponentDisconnected();
+            });
+
+            dataConnection?.on('error', (err) => {
+                console.error('Connection error:', err);
+                gameSessionActions.markOpponentDisconnected();
+            });
+
+            dataConnection?.on('iceStateChanged', (state) => {
+                console.log('ICE state changed:', state);
+                if (state === 'disconnected' || state === 'failed') {
+                    gameSessionActions.markOpponentDisconnected();
+                } else if (state === 'connected' || state === 'completed') {
+                    if ($gameSession.opponentDisconnected && dataConnection) {
+                        gameSessionActions.markOpponentReconnected(dataConnection);
+                    }
+                }
             });
         });
         
@@ -103,6 +142,8 @@
                     game: role.getGame(),
                     isConnected: true
                 });
+                // Persist game state
+                gameSessionActions.persistGameState(role.getGame(), role, $peerConfig.pId);
                 console.log('dataConnection open');
                 role.messageFromCommand(PeerCommands.Helo).then((msg) => dataConnection!.send(msg));
             });
@@ -129,6 +170,27 @@
                 }
                 console.log('receiving data');
                 console.log(data);
+            });
+
+            dataConnection!.on('close', () => {
+                console.log('Connection closed by peer');
+                gameSessionActions.markOpponentDisconnected();
+            });
+
+            dataConnection!.on('error', (err) => {
+                console.error('Connection error:', err);
+                gameSessionActions.markOpponentDisconnected();
+            });
+
+            dataConnection!.on('iceStateChanged', (state) => {
+                console.log('ICE state changed:', state);
+                if (state === 'disconnected' || state === 'failed') {
+                    gameSessionActions.markOpponentDisconnected();
+                } else if (state === 'connected' || state === 'completed') {
+                    if ($gameSession.opponentDisconnected && dataConnection) {
+                        gameSessionActions.markOpponentReconnected(dataConnection);
+                    }
+                }
             });
             them = pId;
             console.log('dataConnection', dataConnection);
@@ -172,7 +234,7 @@
                 </div>
             </div>
 
-                <Modal title="Game Invitation" bind:open={modalVisible} onclose={() => modalVisible = false} dismissable={false}>
+                <Modal headerClass="dark:text-white" title="Game Invitation" bind:open={modalVisible} onclose={() => modalVisible = false} dismissable={false}>
                     <div class="text-center p-6">
                         <div class="w-16 h-16 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center mx-auto mb-4">
                             <svg class="w-8 h-8 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
