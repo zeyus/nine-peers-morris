@@ -11,7 +11,8 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"format": "prettier --write .",
 		"lint": "prettier --check . && eslint .",
-		"test": "vitest --run"
+		"test": "vitest --run",
+		"gh-pages": "pnpm run build && pnpm exec gh-pages --nojekyll -d build -t"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^1.4.1",
@@ -31,6 +32,7 @@
 		"flowbite": "^3.1.2",
 		"flowbite-svelte": "^1.28.3",
 		"flowbite-svelte-icons": "^2.3.0",
+		"gh-pages": "^6.3.0",
 		"globals": "^16.5.0",
 		"prettier": "^3.7.1",
 		"prettier-plugin-svelte": "^3.4.0",
