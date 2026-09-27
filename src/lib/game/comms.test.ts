@@ -25,15 +25,15 @@ if (!globalThis.window.crypto) {
 	globalThis.window.crypto = crypto;
 }
 
+vi.mock('../../thirdparty/peerjs/peer');
+vi.mock('../../thirdparty/peerjs/dataconnection/DataConnection');
+vi.mock('$lib/persisted-store');
+vi.mock('$lib/game/hashable');
+
 describe('Comms', () => {
 	const validHash = '7509e5bda0c762d2bac7f90d758b5b2263fa01ccbc542ab5e3df163be08e6ca9';
 	let win: Window;
 	let conf: PersistedPeerConfig;
-
-	vi.mock('../../thirdparty/peerjs/peer');
-	vi.mock('../../thirdparty/peerjs/dataconnection/DataConnection');
-	vi.mock('$lib/persisted-store');
-	vi.mock('$lib/game/hashable');
 
 	describe('PeerBroker', () => {
 		beforeEach(async () => {

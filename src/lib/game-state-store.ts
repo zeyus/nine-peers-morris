@@ -13,6 +13,10 @@ export interface GameSession {
 	opponentDisconnected: boolean;
 	disconnectedAt: number | null;
 	reconnectionTimeout: number;
+	/** When the connection was last restored, for a brief notice */
+	reconnectedAt: number | null;
+	/** Last protocol error to show the user (e.g. an invalid move from the peer) */
+	lastError: string | null;
 }
 
 export interface PersistedSessionData {
@@ -34,7 +38,9 @@ const initialGameSession: GameSession = {
 	opponentId: null,
 	opponentDisconnected: false,
 	disconnectedAt: null,
-	reconnectionTimeout: 60000 // 60 seconds
+	reconnectionTimeout: 60000, // 60 seconds
+	reconnectedAt: null,
+	lastError: null
 };
 
 const initialPersistedData: PersistedSessionData = {
@@ -93,19 +99,26 @@ export const gameSessionActions = {
 		gameSession.update((current) => ({
 			...current,
 			opponentDisconnected: true,
-			disconnectedAt: Date.now(),
+			// keep the original time so repeated events don't restart the countdown
+			disconnectedAt: current.opponentDisconnected ? current.disconnectedAt : Date.now(),
 			isConnected: false
 		}));
 	},
 
-	markOpponentReconnected: (dataConnection: DataConnection) => {
+	markOpponentReconnected: (dataConnection: DataConnection, announce?: boolean) => {
 		gameSession.update((current) => ({
 			...current,
+			reconnectedAt:
+				(announce ?? current.opponentDisconnected) ? Date.now() : current.reconnectedAt,
 			opponentDisconnected: false,
 			disconnectedAt: null,
 			dataConnection,
 			isConnected: true
 		}));
+	},
+
+	setError: (lastError: string | null) => {
+		gameSession.update((current) => ({ ...current, lastError }));
 	},
 
 	persistGameState: (game: Game | null, peerState: PeerState | null, myPeerId: string | null) => {
@@ -115,26 +128,6 @@ export const gameSessionActions = {
 		}
 
 		const dehydrated = game.dehydrate();
-		const parsed = JSON.parse(dehydrated);
-
-		// Log how many pieces are on the board
-		let pieceCount = 0;
-		if (parsed.board) {
-			const boardData = JSON.parse(parsed.board);
-			for (const vertexEntry of boardData) {
-				const cellData = JSON.parse(vertexEntry.vertex);
-				if (cellData.piece) {
-					pieceCount++;
-				}
-			}
-		}
-
-		console.log(
-			'[PERSIST] Saving game state with',
-			pieceCount,
-			'pieces on board, turn:',
-			parsed.turn
-		);
 
 		const data: PersistedSessionData = {
 			gameState: dehydrated,

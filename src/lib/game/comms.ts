@@ -26,8 +26,34 @@ export const enum PeerCommands {
 	Move = 'MOVE',
 	MoveAck = 'MOVE_ACK',
 	SyncRequest = 'SYNC_REQUEST',
-	SyncResponse = 'SYNC_RESPONSE'
+	SyncResponse = 'SYNC_RESPONSE',
+	Forfeit = 'FORFEIT'
 }
+
+const KNOWN_COMMANDS: ReadonlySet<string> = new Set([
+	'HELO',
+	'EHLO',
+	'PLAY_WITH_ME',
+	'LETS_PLAY',
+	'ROLL',
+	'ROLL_RESULT',
+	'NO_THANKS',
+	'PEER_BLOCKED',
+	'PLAY',
+	'YOUR_TURN',
+	'OK',
+	'ERROR',
+	'HASH_MISMATCH',
+	'GAME_OVER',
+	'MOVE',
+	'MOVE_ACK',
+	'SYNC_REQUEST',
+	'SYNC_RESPONSE',
+	'FORFEIT'
+]);
+
+/** Upper bound on an incoming message, a full game state is well under this */
+const MAX_MESSAGE_LENGTH = 64 * 1024;
 
 export const enum PeerRole {
 	Host,
@@ -51,9 +77,27 @@ export const enum PeerStatus {
 	Blocked
 }
 
+/** Thrown when the peers' game states have diverged */
+export class HashMismatchError extends Error {
+	constructor(message = 'Hash mismatch') {
+		super(message);
+		this.name = 'HashMismatchError';
+	}
+}
+
 export class PeerData {
-	static dataToPeerMessage(rawData: string): PeerMessage {
+	/**
+	 * Parses a raw message from the peer. Returns null for anything that is not a
+	 * well-formed message with a known command.
+	 */
+	static dataToPeerMessage(rawData: unknown): PeerMessage | null {
+		if (typeof rawData !== 'string' || rawData.length > MAX_MESSAGE_LENGTH) {
+			return null;
+		}
 		const parts = rawData.split(':');
+		if (parts.length < 4 || !KNOWN_COMMANDS.has(parts[0])) {
+			return null;
+		}
 		const command = parts[0];
 		const stateHash = parts[1] === '' ? null : parts[1];
 		const newStateHash = parts[2];
@@ -71,6 +115,8 @@ export class PeerData {
 	}
 }
 
+type SyncReason = 'reconnect' | 'mismatch';
+
 export abstract class PeerState implements Hydratable {
 	me: string;
 	them: string;
@@ -78,6 +124,11 @@ export abstract class PeerState implements Hydratable {
 	role: PeerRole = PeerRole.Host;
 	protected lastStateHash: string | null = null;
 	protected game: Game | null = null;
+	/** Set while we are waiting for the peer to answer our sync request */
+	protected pendingSync: SyncReason | null = null;
+	// incoming and outgoing messages are processed strictly in order so that
+	// each message's stateHash is checked against the result of the previous one
+	private queue: Promise<unknown> = Promise.resolve();
 
 	constructor(me: string, them: string) {
 		this.me = me;
@@ -97,12 +148,19 @@ export abstract class PeerState implements Hydratable {
 		return this.lastStateHash;
 	}
 
+	private enqueue<T>(fn: () => Promise<T>): Promise<T> {
+		const task = this.queue.then(fn);
+		this.queue = task.catch(() => undefined);
+		return task;
+	}
+
 	async updateStateHash(): Promise<boolean> {
-		if (this.game) {
-			this.lastStateHash = await this.game.getStateHash();
+		if (!this.game) return false;
+		const snapshot = this.game.dehydrate();
+		return this.enqueue(async () => {
+			this.lastStateHash = await getHash(window, snapshot);
 			return true;
-		}
-		return false;
+		});
 	}
 
 	dehydrate(): string {
@@ -134,97 +192,124 @@ export abstract class PeerState implements Hydratable {
 	}
 
 	abstract startGame(win: Window, game?: Game | null): void;
-	// option 1, handle message in the state/Comms
-	async handleMessage(msg: PeerMessage): Promise<void> {
-		console.log(`Received message: ${msg.command}`);
-		console.log(`(msg)stateHash: ${msg.stateHash}`);
-		console.log(`lastStateHash: ${this.lastStateHash}`);
-		console.log(`data: ${msg.data}`);
 
-		// Always validate that the sender's state hash matches our current state
-		// Exception: HELO and EHLO messages can have null stateHash for initial handshake
-		if (
-			msg.stateHash !== this.lastStateHash &&
-			!(msg.command === PeerCommands.Helo && msg.stateHash === null) &&
-			!(msg.command === PeerCommands.Elho && this.lastStateHash === null)
-		) {
-			console.error('State hash mismatch - games are out of sync');
-			throw new Error('Hash mismatch');
+	/**
+	 * Validates and applies a message from the peer. Messages are processed one at a
+	 * time in arrival order. Throws HashMismatchError when the games have diverged
+	 * (the caller should request a sync) and Error for invalid messages.
+	 */
+	handleMessage(msg: PeerMessage): Promise<void> {
+		return this.enqueue(() => this.processMessage(msg));
+	}
+
+	private async processMessage(msg: PeerMessage): Promise<void> {
+		// Validate that the sender's previous state hash matches our current state.
+		// The handshake starts without a state, and sync/forfeit messages are how
+		// out-of-sync peers recover, so they are exempt.
+		const exempt =
+			(msg.command === PeerCommands.Helo && msg.stateHash === null) ||
+			(msg.command === PeerCommands.Elho && this.lastStateHash === null) ||
+			msg.command === PeerCommands.SyncRequest ||
+			msg.command === PeerCommands.SyncResponse ||
+			msg.command === PeerCommands.HashMismatch ||
+			msg.command === PeerCommands.Forfeit;
+		if (!exempt && msg.stateHash !== this.lastStateHash) {
+			throw new HashMismatchError('State hash mismatch - games are out of sync');
 		}
 
-		if (msg.command === PeerCommands.SyncRequest) {
-			// Opponent is requesting current game state (reconnection scenario)
-			console.log('Received sync request from opponent');
-			// Will be handled by the component to send back game state
-		} else if (msg.command === PeerCommands.SyncResponse) {
-			// Received game state from opponent after reconnection
-			console.log('Received sync response with game state');
-			// Will be handled by the component to restore game state
-		} else if (msg.command === PeerCommands.Move) {
-			// Opponent made a move, apply it to our game
-			if (this.game && msg.data) {
-				try {
-					const moveData = JSON.parse(msg.data);
-					console.log('Received move from opponent:', moveData);
-
-					// Apply the move to our game instance
-					const success = this.game.applyMove(moveData);
-					if (success) {
-						// Update our state hash to reflect the new game state
-						this.lastStateHash = await this.game.getStateHash();
-						console.log('Move applied successfully, new hash:', this.lastStateHash);
-
-						// Force a reactive update by triggering the turn counter
-						// This ensures Svelte detects the game state change
-						if (this.game.getTurn) {
-							this.game.getTurn.value = this.game.getTurn.valueOf();
-						}
-					} else {
-						console.error('Failed to apply opponent move');
-						throw new Error('Invalid move received');
-					}
-				} catch (error) {
-					console.error('Error applying opponent move:', error);
-					throw error;
+		switch (msg.command) {
+			case PeerCommands.SyncRequest:
+			case PeerCommands.HashMismatch:
+				// answered by the connection layer (SyncResponse / SyncRequest)
+				return;
+			case PeerCommands.SyncResponse:
+				return this.applySyncResponse(msg);
+			case PeerCommands.Forfeit:
+				this.game?.forfeit(this.them);
+				return;
+			case PeerCommands.Move:
+				return this.applyMoveMessage(msg);
+			default: {
+				const hash = await this._getHash(false, msg.data);
+				if (msg.newStateHash !== hash) {
+					throw new HashMismatchError();
 				}
-			}
-		} else {
-			// For other messages, validate the computed hash
-			const hash = await this._getHash(false, msg.data);
-			console.log(`Computed hash: ${hash}`);
-			console.log(`(msg)New State Hash: ${msg.newStateHash}`);
-
-			if (msg.newStateHash !== hash) {
-				throw new Error('Hash mismatch');
-			}
-			this.lastStateHash = msg.newStateHash;
-		}
-
-		if (msg.command === PeerCommands.Play) {
-			if (this.state === PeerStatus.Connecting) {
-				//
-			}
-		} else if (msg.command === PeerCommands.YourTurn) {
-			if (this.state === PeerStatus.Playing) {
-				//
-			}
-		} else if (msg.command === PeerCommands.GameOver) {
-			if (this.state === PeerStatus.Playing) {
-				//
+				this.lastStateHash = msg.newStateHash;
 			}
 		}
 	}
 
-	async prepareMessage(command: PeerCommands, data: string): Promise<PeerMessage> {
-		const msg: PeerMessage = {
-			command,
-			stateHash: this.lastStateHash,
-			newStateHash: await this._getHash(true, data),
-			data
-		};
-		// update lastStateHash
-		this.lastStateHash = msg.newStateHash!;
-		return msg;
+	private async applyMoveMessage(msg: PeerMessage): Promise<void> {
+		if (!this.game) {
+			throw new Error('No game in progress');
+		}
+		let moveData: unknown;
+		try {
+			moveData = JSON.parse(msg.data);
+		} catch {
+			throw new Error('Malformed move received');
+		}
+		if (!this.game.applyMove(moveData)) {
+			throw new Error('Invalid move received');
+		}
+		// snapshot synchronously so later local changes can't leak into the hash
+		const hash = await getHash(window, this.game.dehydrate());
+		if (hash !== msg.newStateHash) {
+			throw new HashMismatchError('Game state differs from peer after move');
+		}
+		this.lastStateHash = hash;
+	}
+
+	private async applySyncResponse(msg: PeerMessage): Promise<void> {
+		const reason = this.pendingSync;
+		if (!reason || !this.game) {
+			throw new Error('Unexpected sync response');
+		}
+		const game = this.game;
+		const before = game.dehydrate();
+		const beforeTurn = game.getTurn.valueOf();
+		const beforeWinner = game.getWinner;
+		const localBefore = game.localPlayer?.pieceCount ?? 0;
+
+		game.restore(msg.data);
+
+		// A resync after a mismatch must not let the peer rewrite history in its favour
+		if (
+			reason === 'mismatch' &&
+			(game.getTurn.valueOf() !== beforeTurn ||
+				(game.getWinner !== null && game.getWinner !== beforeWinner) ||
+				(game.localPlayer?.pieceCount ?? 0) < localBefore)
+		) {
+			game.restore(before);
+			throw new Error('Rejected sync state from peer');
+		}
+		const hash = await getHash(window, game.dehydrate());
+		if (hash !== msg.newStateHash) {
+			game.restore(before);
+			throw new HashMismatchError('Sync state hash mismatch');
+		}
+		this.pendingSync = null;
+		this.lastStateHash = hash;
+	}
+
+	/**
+	 * Builds the next outgoing message. The game state is captured synchronously
+	 * (before any await) and messages are hashed in call order.
+	 */
+	prepareMessage(command: PeerCommands, data: string): Promise<PeerMessage> {
+		const snapshot = this.game ? this.game.dehydrate() : null;
+		return this.enqueue(async () => {
+			const newStateHash =
+				snapshot !== null ? await getHash(window, snapshot) : await this._getHash(true, data);
+			const msg: PeerMessage = {
+				command,
+				stateHash: this.lastStateHash,
+				newStateHash,
+				data
+			};
+			this.lastStateHash = newStateHash;
+			return msg;
+		});
 	}
 
 	private async _getHash(outgoing: boolean, data?: string): Promise<string> {
@@ -248,6 +333,17 @@ export abstract class PeerState implements Hydratable {
 		const moveJson = JSON.stringify(moveData);
 		return await this.messageFromCommand(PeerCommands.Move, moveJson);
 	}
+
+	/** Builds a request asking the peer for its full game state */
+	requestSync(reason: SyncReason): Promise<string> {
+		this.pendingSync = reason;
+		return this.messageFromCommand(PeerCommands.SyncRequest);
+	}
+
+	/** Builds a response carrying our full game state */
+	syncResponse(): Promise<string> {
+		return this.messageFromCommand(PeerCommands.SyncResponse, this.game?.dehydrate() ?? '');
+	}
 }
 
 export class GameHost extends PeerState {
@@ -258,7 +354,7 @@ export class GameHost extends PeerState {
 	startGame(win: Window, game?: Game | null): void {
 		const me = new Player(this.me, 'X', true);
 		const them = new Player(this.them, 'O', false);
-		this.game = game ? game : new NinePeersMorris(win, me, them);
+		this.game = game ? game : new NinePeersMorris(win, me, them, this.me);
 	}
 
 	static rehydrate(data: string, game: Game): GameHost {
@@ -281,7 +377,7 @@ export class GameClient extends PeerState {
 	startGame(win: Window, game?: Game | null): void {
 		const me = new Player(this.me, 'O', false);
 		const them = new Player(this.them, 'X', true);
-		this.game = game ? game : new NinePeersMorris(win, me, them);
+		this.game = game ? game : new NinePeersMorris(win, me, them, this.me);
 	}
 
 	static rehydrate(data: string, game: Game): GameClient {

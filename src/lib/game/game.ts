@@ -51,6 +51,7 @@ export class Player implements Hashable {
 	}
 	reset() {
 		this.pieces = [];
+		this.removedPieces = [];
 		this.isWinner = false;
 	}
 	addPiece(piece: GamePiece) {
@@ -97,6 +98,7 @@ export class Player implements Hashable {
 			id: this.id,
 			name: this.name,
 			pieces: this.pieces.map((piece) => piece.dehydrate()),
+			removed: this.removedPieces.map((piece) => piece.id),
 			isWinner: this.isWinner,
 			isInitiator: this.isInitiator
 		});
@@ -178,6 +180,7 @@ export class GamePiece implements Hashable {
 
 	dehydrate(): string {
 		return JSON.stringify({
+			id: this.id,
 			player: this.player.id,
 			cell: this.cell !== null ? this.cell.id : null,
 			state: this.state
@@ -193,6 +196,8 @@ export type BoardOptions = {
 	millCount?: number;
 	fly?: boolean;
 	flyAt?: number;
+	/** Explicit lists of cell ids that form a mill. When omitted, mills are detected by row/col. */
+	mills?: number[][];
 };
 
 export const defaultOptions: BoardOptions = {
@@ -213,6 +218,7 @@ export class Board implements Hashable {
 	players: Player[];
 	fly: boolean;
 	flyAt: number;
+	mills: number[][] | null;
 	[index: number]: Cell;
 
 	constructor(boardOptions?: BoardOptions) {
@@ -239,6 +245,7 @@ export class Board implements Hashable {
 		});
 		this.fly = options.fly!;
 		this.flyAt = options.flyAt!;
+		this.mills = options.mills ?? null;
 
 		if (options.graph) {
 			this.state = options.graph;
@@ -268,6 +275,12 @@ export class Board implements Hashable {
 			return false;
 		}
 		const player = cell.piece.player;
+		if (this.mills) {
+			return this.mills.some(
+				(line) =>
+					line.includes(cell.id) && line.every((id) => this.getCell(id)?.piece?.player === player)
+			);
+		}
 		const cellsWithPlayerPiece = this.state.contiguousBreathFirstSearch(
 			cell,
 			(c) =>
@@ -332,6 +345,28 @@ export class Board implements Hashable {
 }
 
 export class NineBoard extends Board {
+	/** Every line of three cells that forms a mill (see the diagram below). */
+	static readonly MILLS: number[][] = [
+		// horizontal
+		[0, 1, 2],
+		[3, 4, 5],
+		[6, 7, 8],
+		[9, 10, 11],
+		[12, 13, 14],
+		[15, 16, 17],
+		[18, 19, 20],
+		[21, 22, 23],
+		// vertical
+		[0, 9, 21],
+		[3, 10, 18],
+		[6, 11, 15],
+		[1, 4, 7],
+		[16, 19, 22],
+		[8, 12, 17],
+		[5, 13, 20],
+		[2, 14, 23]
+	];
+
 	constructor(players: Player[]) {
 		const cells: Cell[] = [];
 		const graph = new Graph<Cell>(
@@ -462,7 +497,8 @@ export class NineBoard extends Board {
 			graph: graph,
 			millCount: 3,
 			fly: true,
-			flyAt: 3
+			flyAt: 3,
+			mills: NineBoard.MILLS
 		};
 		super(options);
 		for (let i = 0; i < 24; i++) {
@@ -478,40 +514,58 @@ export abstract class Game implements Hashable {
 	protected board: Board;
 	protected currentPlayer: Player;
 	protected winner: Player | null;
-	protected gameStateHash: GameStateHash;
 	public validMoves: readonly Cell[] = [];
+	public removablePieces: readonly GamePiece[] = [];
 	public phase: GamePhase;
+	/** The id of the player controlling this client, or null for local hot-seat play */
+	public localPlayerId: string | null;
 	public abstract get selectionVersion(): number;
 	public abstract selectedPiece: GamePiece | null;
+	private changeListeners = new Set<() => void>();
 
-	constructor(me: Player, them: Player, board: Board) {
+	constructor(me: Player, them: Player, board: Board, localPlayerId: string | null = null) {
 		if (me === them) {
 			throw new Error('Players must be different');
 		}
 		this.turn = new SubscribableNum(0);
 		this.phase = GamePhase.Placement;
-		// initiator first to simplify dehydrating and hashing...for now
+		// initiator first so both peers dehydrate (and hash) the game identically
 		this.players = me.isInitiator ? [me, them] : [them, me];
 		this.board = board;
-		this.currentPlayer = this.players[0]; // let's always start with the first player, later we can randomize
+		this.currentPlayer = this.players[0];
 		this.winner = null;
-		this.gameStateHash = {};
+		this.localPlayerId = localPlayerId;
 	}
 
 	abstract canPlacePiece(): boolean;
+
+	abstract isMyTurn(): boolean;
 
 	abstract handleCellClick(cell: Cell): GameMove | null;
 	abstract handleCellClickForced(cell: Cell): GameMove | null;
 
 	abstract dehydrate(): string;
 
-	abstract applyMove(move: GameMove): boolean;
+	abstract restore(dehydratedState: string): void;
+
+	abstract applyMove(move: unknown): boolean;
+
+	abstract forfeit(playerId: string): void;
 
 	abstract getStateHash(): Promise<string>;
 
-	protected abstract _addHash(hash: string): void;
+	/**
+	 * Registers a listener that is called whenever the game state changes
+	 * (moves, selection, phase, winner). Returns an unsubscribe function.
+	 */
+	onChange(fn: () => void): () => void {
+		this.changeListeners.add(fn);
+		return () => this.changeListeners.delete(fn);
+	}
 
-	protected abstract _validateHash(hash: string): boolean;
+	protected notifyChange(): void {
+		this.changeListeners.forEach((fn) => fn());
+	}
 
 	// Public getters for read-only access
 	get getCurrentPlayer(): Player {
@@ -533,37 +587,56 @@ export abstract class Game implements Hashable {
 	get getPlayers(): readonly Player[] {
 		return Object.freeze([...this.players]);
 	}
+
+	/** The player controlling this client, or null in hot-seat mode */
+	get localPlayer(): Player | null {
+		return this.players.find((p) => p.id === this.localPlayerId) ?? null;
+	}
 }
 
-// for checking after turns that
-// the peer is not trying to cheat.
-// sending a move will be replicated
-// on the recieving peer, validated
-// and then the state hash for the previous
-// and new turn will be additionally validated
-export type GameStateHash = {
-	[key: number]: string;
-};
-
 export interface Subscribable {
-	subscribe(fn: (value: number) => void): void;
+	subscribe(fn: (value: number) => void): () => void;
 }
 
 export class SubscribableNum extends Number implements Subscribable {
-	private subscribers: ((value: number) => void)[] = [];
+	private subscribers = new Set<(value: number) => void>();
+	private current: number;
 
 	constructor(value: number) {
 		super(value);
+		this.current = value;
 	}
 
-	subscribe(fn: (value: number) => void) {
-		this.subscribers.push(fn);
+	valueOf(): number {
+		return this.current;
+	}
+
+	subscribe(fn: (value: number) => void): () => void {
+		this.subscribers.add(fn);
+		return () => this.subscribers.delete(fn);
+	}
+
+	get value(): number {
+		return this.current;
 	}
 
 	set value(value: number) {
-		this.valueOf = () => value;
-		this.subscribers.forEach((fn) => fn(value));
+		this.set(value);
 	}
+
+	/** Sets the value, optionally without notifying subscribers */
+	set(value: number, notify: boolean = true) {
+		this.current = value;
+		if (notify) {
+			this.subscribers.forEach((fn) => fn(value));
+		}
+	}
+}
+
+function isCellId(value: unknown, board: Board): value is number {
+	return (
+		typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < board.cellCount
+	);
 }
 
 /**
@@ -571,7 +644,6 @@ export class SubscribableNum extends Number implements Subscribable {
  */
 export class NinePeersMorris extends Game {
 	private win: Window;
-	private ready: boolean;
 	public selectedPiece: GamePiece | null = null;
 	public selectedCell: Cell | null = null;
 
@@ -581,20 +653,17 @@ export class NinePeersMorris extends Game {
 		return this._selectionVersion;
 	}
 
-	public removablePieces: readonly GamePiece[] = [];
-
 	/**
 	 * Creates a new Nine Men's Morris game
 	 * @param win - Browser window object for cryptographic operations
 	 * @param me - The local player
 	 * @param them - The remote player
+	 * @param localPlayerId - Id of the player this client controls; null lets both players
+	 *   take turns on this client (hot-seat / demo mode)
 	 */
-	constructor(win: Window, me: Player, them: Player) {
-		super(me, them, new NineBoard([me, them]));
+	constructor(win: Window, me: Player, them: Player, localPlayerId: string | null = null) {
+		super(me, them, new NineBoard([me, them]), localPlayerId);
 		this.win = win;
-		this.ready = true;
-		this.onTurnChange(0);
-		this.turn.subscribe(this.onTurnChange.bind(this));
 	}
 
 	dehydrate(): string {
@@ -604,136 +673,125 @@ export class NinePeersMorris extends Game {
 			winner: this.winner ? this.winner.id : null,
 			turn: this.turn.valueOf(),
 			board: this.board.state.dehydrate(),
-			phase: this.phase
+			phase: this.phase,
+			millToRemove: this.millToRemove
 		});
 	}
 
 	/**
 	 * Restores a game from dehydrated state
 	 */
-	static async rehydrate(win: Window, dehydratedState: string): Promise<NinePeersMorris> {
+	static async rehydrate(
+		win: Window,
+		dehydratedState: string,
+		localPlayerId: string | null = null
+	): Promise<NinePeersMorris> {
 		const data = JSON.parse(dehydratedState);
-
-		// Parse player data
 		const p1Data = JSON.parse(data.players[0]);
 		const p2Data = JSON.parse(data.players[1]);
-
-		// Create players
-		const player1 = new Player(
-			p1Data.id,
-			p1Data.name,
-			p1Data.isInitiator !== undefined ? p1Data.isInitiator : true
-		);
-		const player2 = new Player(
-			p2Data.id,
-			p2Data.name,
-			p2Data.isInitiator !== undefined ? p2Data.isInitiator : false
-		);
-
-		// Create new game
-		const game = new NinePeersMorris(win, player1, player2);
-
-		// Restore board state
-		if (data.board) {
-			const boardData = JSON.parse(data.board);
-			console.log('[REHYDRATE] Starting board restoration, vertices:', boardData.length);
-			// The board data is an array of vertices from the graph
-			// Each vertex is a Cell with its dehydrated data
-			for (const vertexEntry of boardData) {
-				const cellData = JSON.parse(vertexEntry.vertex);
-				if (cellData.piece) {
-					console.log('[REHYDRATE] Found piece on cell', cellData.id);
-					const cell = game.board.getCell(cellData.id);
-					const pieceData = JSON.parse(cellData.piece);
-					console.log('[REHYDRATE] Piece data:', pieceData);
-
-					// Find which player owns this piece
-					const owner = pieceData.player === player1.id ? player1 : player2;
-					console.log(
-						'[REHYDRATE] Owner:',
-						owner.id,
-						'unplaced pieces:',
-						owner.unplacedPieces.length
-					);
-
-					// The game already created 9 pieces for each player in the constructor
-					// We just need to find an unplaced piece and place it
-					const piece = owner.unplacedPieces[0] || owner.allPieces[0];
-
-					if (piece && pieceData.state === 'placed' && pieceData.cell === cell.id) {
-						console.log('[REHYDRATE] Placing piece on cell', cell.id);
-						game.board.placePiece(piece, cell);
-						console.log('[REHYDRATE] Cell now has piece:', !!cell.piece);
-					} else {
-						console.log(
-							'[REHYDRATE] NOT placing piece. piece:',
-							!!piece,
-							'state:',
-							pieceData.state,
-							'cellMatch:',
-							pieceData.cell === cell.id
-						);
-					}
-				}
-			}
-			console.log('[REHYDRATE] Board restoration complete');
-		}
-
-		// Restore current player
-		game.currentPlayer = data.currentPlayer === player1.id ? player1 : player2;
-
-		// Restore winner if any
-		if (data.winner) {
-			game.winner = data.winner === player1.id ? player1 : player2;
-		}
-
-		// Restore game phase
-		if (data.phase) {
-			game.phase = data.phase;
-		}
-
-		// Initialize game state hash for current turn BEFORE setting turn value
-		game.ready = true;
-		await game.getStateHash().then((hash) => {
-			game._addHash(hash, data.turn || 0);
-			game.ready = true;
-		});
-
-		// Restore turn counter AFTER hash is computed
-		// We override valueOf directly to avoid triggering subscribers
-		if (data.turn !== undefined) {
-			game.turn.valueOf = () => data.turn;
-		}
-
+		const player1 = new Player(String(p1Data.id), String(p1Data.name), p1Data.isInitiator ?? true);
+		const player2 = new Player(String(p2Data.id), String(p2Data.name), p2Data.isInitiator ?? false);
+		const game = new NinePeersMorris(win, player1, player2, localPlayerId);
+		game.restore(dehydratedState);
 		return game;
 	}
 
-	private onTurnChange(newTurn: number) {
-		if (!this.ready) {
-			throw new Error('Game not ready');
+	/**
+	 * Replaces this game's state with a dehydrated state for the same two players.
+	 * Throws (leaving the game unchanged) if the state is malformed or inconsistent.
+	 */
+	restore(dehydratedState: string): void {
+		const data = JSON.parse(dehydratedState);
+		if (!data || !Array.isArray(data.players) || data.players.length !== 2) {
+			throw new Error('Invalid game state: players');
 		}
-		this.ready = false;
-		this.getStateHash().then((hash) => {
-			this._addHash(hash, newTurn - 1); // this might need to change
-			this.ready = true;
-		});
+		const playerData = data.players.map((p: string) => JSON.parse(p));
+		const byId = new Map(this.players.map((p) => [p.id, p]));
+		for (const pd of playerData) {
+			if (!byId.has(pd.id)) throw new Error('Invalid game state: unknown player');
+		}
+		if (new Set(playerData.map((pd: { id: string }) => pd.id)).size !== 2) {
+			throw new Error('Invalid game state: duplicate player');
+		}
+		if (!Object.values(GamePhase).includes(data.phase)) {
+			throw new Error('Invalid game state: phase');
+		}
+		if (!byId.has(data.currentPlayer)) throw new Error('Invalid game state: current player');
+		if (data.winner !== null && data.winner !== undefined && !byId.has(data.winner)) {
+			throw new Error('Invalid game state: winner');
+		}
+		const turn = Number(data.turn ?? 0);
+		if (!Number.isInteger(turn) || turn < 0) throw new Error('Invalid game state: turn');
+
+		const boardData = typeof data.board === 'string' ? JSON.parse(data.board) : [];
+		const placements: { cell: Cell; owner: Player; pieceId: string | null }[] = [];
+		for (const vertexEntry of boardData) {
+			const cellData = JSON.parse(vertexEntry.vertex);
+			if (!cellData.piece) continue;
+			const pieceData = JSON.parse(cellData.piece);
+			const owner = byId.get(pieceData.player);
+			if (!owner || !isCellId(cellData.id, this.board)) {
+				throw new Error('Invalid game state: board');
+			}
+			placements.push({
+				cell: this.board.getCell(cellData.id),
+				owner,
+				pieceId: pieceData.id !== undefined ? String(pieceData.id) : null
+			});
+		}
+
+		const perPlayer = this.board.pieceCount / this.board.nPlayers;
+		const removedById = new Map<string, string[]>();
+		for (const pd of playerData) {
+			const removed: string[] = Array.isArray(pd.removed) ? pd.removed.map(String) : [];
+			const placedCount = placements.filter((pl) => pl.owner.id === pd.id).length;
+			if (removed.length + placedCount > perPlayer) {
+				throw new Error('Invalid game state: too many pieces');
+			}
+			removedById.set(pd.id, removed);
+		}
+
+		// validation passed, rebuild the state from scratch
+		this.board.state.filter(() => true).forEach((cell) => (cell.piece = null));
+		for (const player of this.players) {
+			player.reset();
+			player.addPieces(
+				Array.from({ length: perPlayer }, (_, i) => new GamePiece(player, i.toString()))
+			);
+			for (const id of removedById.get(player.id)!) {
+				const piece = player.allPieces.find((p) => p.id === id && p.state === 'unplaced');
+				if (!piece) throw new Error('Invalid game state: removed piece');
+				piece.state = 'removed';
+				player.removePiece(piece);
+			}
+		}
+		for (const { cell, owner, pieceId } of placements) {
+			const piece =
+				owner.unplacedPieces.find((p) => p.id === pieceId) ?? owner.unplacedPieces[0] ?? null;
+			if (!piece) throw new Error('Invalid game state: piece');
+			this.board.placePiece(piece, cell);
+		}
+
+		this.currentPlayer = byId.get(data.currentPlayer)!;
+		this.winner = data.winner ? byId.get(data.winner)! : null;
+		this.phase = data.phase;
+		this.millToRemove = this.phase === GamePhase.Capture && data.millToRemove !== false;
+		this.removablePieces = this.millToRemove
+			? this.getRemovablePieces(this.currentPlayer)
+			: Object.freeze([]);
+		this.clearSelection();
+		this.turn.set(turn, false);
+		this.notifyChange();
 	}
 
 	async getStateHash(): Promise<string> {
 		return getHash(this.win, this.dehydrate());
 	}
 
-	protected _addHash(hash: string, turn?: number): void {
-		this.gameStateHash[turn || this.turn.value] = hash;
-	}
-
-	protected _validateHash(hash: string, turn?: number): boolean {
-		return this.gameStateHash[turn || this.turn.value] === hash;
-	}
-
-	/** Checks if it's the local player's turn */
+	/** Checks if it's the local player's turn (always true in hot-seat mode) */
 	isMyTurn(): boolean {
-		return this.currentPlayer.id === this.players[0].id; // assuming first player is "me"
+		if (this.phase === GamePhase.GameOver) return false;
+		return this.localPlayerId === null || this.currentPlayer.id === this.localPlayerId;
 	}
 
 	/** Gets the opponent of the specified player */
@@ -750,7 +808,7 @@ export class NinePeersMorris extends Game {
 
 	/** Checks if the current player can move a piece */
 	canMovePiece(): boolean {
-		return this.phase === GamePhase.Movement;
+		return this.phase === GamePhase.Movement && this.isMyTurn();
 	}
 
 	/** Checks if the current player can remove an opponent's piece */
@@ -779,576 +837,232 @@ export class NinePeersMorris extends Game {
 	}
 
 	/**
-	 * Handles a cell click interaction
+	 * Handles a cell click by the local player
 	 * @param cell - The cell that was clicked
 	 * @returns The game move that was made, or null if no valid move
 	 */
 	handleCellClick(cell: Cell): GameMove | null {
 		if (!this.isMyTurn()) return null;
-
-		switch (this.phase) {
-			case GamePhase.Placement:
-				return this.handlePlacementClick(cell);
-			case GamePhase.Movement:
-				return this.handleMovementClick(cell);
-			case GamePhase.Capture:
-				return this.handleCaptureClick(cell);
-			default:
-				return null;
-		}
+		return this.handleCellClickForced(cell);
 	}
 
 	/**
-	 * Handles a cell click without turn validation (for multiplayer)
+	 * Handles a cell click on behalf of the current player, without checking
+	 * which player this client controls. All game rules are still enforced.
 	 */
 	handleCellClickForced(cell: Cell): GameMove | null {
 		switch (this.phase) {
 			case GamePhase.Placement:
-				return this.handlePlacementClickForced(cell);
+				return this.tryPlace(this.currentPlayer, cell);
 			case GamePhase.Movement:
-				return this.handleMovementClickForced(cell);
+				return this.handleMovementClick(cell);
 			case GamePhase.Capture:
-				return this.handleCaptureClickForced(cell);
+				return this.tryRemove(this.currentPlayer, cell);
 			default:
 				return null;
 		}
 	}
 
-	private handleMovementClickForced(cell: Cell): GameMove | null {
-		// Same as handleMovementClick but without the canMovePiece() check
-		if (this.phase !== GamePhase.Movement) return null;
-
-		// If clicking on own piece, toggle selection
-		if (cell.piece && cell.piece.player.id === this.currentPlayer.id) {
-			// If clicking the same piece, deselect it
-			if (this.selectedPiece === cell.piece) {
-				this.selectedPiece = null;
-				this.selectedCell = null;
-				this.validMoves = Object.freeze([]);
-				this._selectionVersion++;
-				console.log('Deselected piece (forced)');
-				return null;
-			}
-
-			// Otherwise, select the new piece
-			this.selectedPiece = cell.piece;
-			this.selectedCell = cell;
-			this.validMoves = this.getValidMoves(cell.piece);
-			this._selectionVersion++;
-			console.log('Selected piece for movement (forced):', {
-				pieceId: cell.piece.id,
-				cellId: cell.id,
-				validMovesCount: this.validMoves.length,
-				canFly: cell.piece.player.pieceCount <= 3
-			});
-			return null;
-		}
-
-		// If clicking on empty cell with selected piece
-		if (!cell.piece && this.selectedPiece && this.validMoves.includes(cell)) {
-			const fromCell = this.selectedPiece.cell!;
-
-			try {
-				if (this.selectedPiece.player.pieceCount <= 3) {
-					this.board.flyPiece(this.selectedPiece, cell);
-				} else {
-					this.board.movePiece(this.selectedPiece, cell);
-				}
-
-				const move: GameMove = {
-					action: GameAction.MovePiece,
-					playerId: this.currentPlayer.id,
-					pieceId: this.selectedPiece.id,
-					fromCellId: fromCell.id,
-					toCellId: cell.id
-				};
-
-				this.selectedPiece = null;
-				this.selectedCell = null;
-				this.validMoves = Object.freeze([]);
-
-				// Check for mill
-				if (this.board.checkForMill(cell)) {
-					this.millToRemove = true;
-					this.removablePieces = this.getRemovablePieces(this.currentPlayer);
-					this.phase = GamePhase.Capture;
-				} else {
-					this.nextTurn();
-				}
-
-				return move;
-			} catch (error) {
-				console.error('Error moving piece (forced):', error);
-				// Reset selection on error
-				this.selectedPiece = null;
-				this.selectedCell = null;
-				this.validMoves = Object.freeze([]);
-				return null;
-			}
-		}
-
-		// If clicking elsewhere, clear selection
-		if (this.selectedPiece) {
-			this.selectedPiece = null;
-			this.selectedCell = null;
-			this.validMoves = Object.freeze([]);
-			this._selectionVersion++;
-		}
-
-		return null;
-	}
-
-	private handlePlacementClickForced(cell: Cell): GameMove | null {
-		if (cell.piece || this.phase !== GamePhase.Placement || !this.currentPlayer.nextPiece) {
-			console.log('Placement blocked:', {
-				hasPiece: !!cell.piece,
-				phase: this.phase,
-				hasNextPiece: !!this.currentPlayer.nextPiece
-			});
-			return null;
-		}
-
-		const piece = this.currentPlayer.nextPiece!;
-		this.board.placePiece(piece, cell);
-
-		const move: GameMove = {
-			action: GameAction.PlacePiece,
-			playerId: this.currentPlayer.id,
-			pieceId: piece.id,
-			toCellId: cell.id
-		};
-
-		// Check for mill
-		if (this.board.checkForMill(cell)) {
-			console.log('Mill formed! Entering capture phase');
-			this.millToRemove = true;
-			const opponent = this.getOpponent(this.currentPlayer);
-			this.removablePieces = Object.freeze(this.getRemovablePieces(this.currentPlayer));
-			this.phase = GamePhase.Capture;
-			console.log('Current player:', this.currentPlayer.name);
-			console.log('Opponent:', opponent.name);
-			console.log(
-				'Removable pieces:',
-				this.removablePieces.length,
-				this.removablePieces.map((p) => ({ id: p.id, player: p.player.name, cell: p.cell?.id }))
-			);
-			// Don't change turn - current player continues to remove a piece
-		} else {
-			this.nextTurn();
-		}
-
-		return move;
-	}
-
-	private handlePlacementClick(cell: Cell): GameMove | null {
-		if (cell.piece || !this.canPlacePiece()) return null;
-
-		const piece = this.currentPlayer.nextPiece!;
-		this.board.placePiece(piece, cell);
-
-		const move: GameMove = {
-			action: GameAction.PlacePiece,
-			playerId: this.currentPlayer.id,
-			pieceId: piece.id,
-			toCellId: cell.id
-		};
-
-		// Check for mill
-		if (this.board.checkForMill(cell)) {
-			console.log('Mill formed! Entering capture phase');
-			this.millToRemove = true;
-			const opponent = this.getOpponent(this.currentPlayer);
-			this.removablePieces = this.getRemovablePieces(this.currentPlayer);
-			this.phase = GamePhase.Capture;
-			console.log('Current player:', this.currentPlayer.name);
-			console.log('Opponent:', opponent.name);
-			console.log(
-				'Removable pieces:',
-				this.removablePieces.length,
-				this.removablePieces.map((p) => ({ id: p.id, player: p.player.name, cell: p.cell?.id }))
-			);
-			// Don't change turn - current player continues to remove a piece
-		} else {
-			this.nextTurn();
-		}
-
-		return move;
-	}
-
 	private handleMovementClick(cell: Cell): GameMove | null {
-		if (!this.canMovePiece()) return null;
-
-		// If clicking on own piece, toggle selection
-		if (cell.piece && cell.piece.player.id === this.currentPlayer.id) {
-			// If clicking the same piece, deselect it
+		// Clicking one of your own pieces toggles its selection
+		if (cell.piece && cell.piece.player === this.currentPlayer) {
 			if (this.selectedPiece === cell.piece) {
-				this.selectedPiece = null;
-				this.selectedCell = null;
-				this.validMoves = Object.freeze([]);
+				this.clearSelection();
+			} else {
+				this.selectedPiece = cell.piece;
+				this.selectedCell = cell;
+				this.validMoves = this.getValidMoves(cell.piece);
 				this._selectionVersion++;
-				console.log('Deselected piece');
-				return null;
 			}
-
-			// Otherwise, select the new piece
-			this.selectedPiece = cell.piece;
-			this.selectedCell = cell;
-			this.validMoves = this.getValidMoves(cell.piece);
-			this._selectionVersion++;
-			console.log('Selected piece for movement:', {
-				pieceId: cell.piece.id,
-				cellId: cell.id,
-				validMovesCount: this.validMoves.length,
-				canFly: cell.piece.player.pieceCount <= 3
-			});
+			this.notifyChange();
 			return null;
 		}
 
-		// If clicking on empty cell with selected piece
-		if (!cell.piece && this.selectedPiece && this.validMoves.includes(cell)) {
-			const fromCell = this.selectedPiece.cell!;
-
-			try {
-				if (this.selectedPiece.player.pieceCount <= 3) {
-					this.board.flyPiece(this.selectedPiece, cell);
-				} else {
-					this.board.movePiece(this.selectedPiece, cell);
-				}
-
-				const move: GameMove = {
-					action: GameAction.MovePiece,
-					playerId: this.currentPlayer.id,
-					pieceId: this.selectedPiece.id,
-					fromCellId: fromCell.id,
-					toCellId: cell.id
-				};
-
-				this.selectedPiece = null;
-				this.selectedCell = null;
-				this.validMoves = Object.freeze([]);
-
-				// Check for mill
-				if (this.board.checkForMill(cell)) {
-					this.millToRemove = true;
-					this.removablePieces = this.getRemovablePieces(this.currentPlayer);
-					this.phase = GamePhase.Capture;
-				} else {
-					this.nextTurn();
-				}
-
-				return move;
-			} catch (error) {
-				console.error('Error moving piece:', error);
-				// Reset selection on error
-				this.selectedPiece = null;
-				this.selectedCell = null;
-				this.validMoves = Object.freeze([]);
-				return null;
-			}
+		if (this.selectedPiece?.cell && this.validMoves.includes(cell)) {
+			return this.tryMove(this.currentPlayer, this.selectedPiece.cell, cell);
 		}
 
-		// If clicking elsewhere, clear selection
+		// Clicking elsewhere clears the selection
 		if (this.selectedPiece) {
-			this.selectedPiece = null;
-			this.selectedCell = null;
-			this.validMoves = Object.freeze([]);
-			this._selectionVersion++;
+			this.clearSelection();
+			this.notifyChange();
 		}
-
 		return null;
 	}
 
-	private handleCaptureClickForced(cell: Cell): GameMove | null {
-		if (this.phase !== GamePhase.Capture || !this.millToRemove || !cell.piece) {
-			console.log('Forced capture blocked:', {
-				phase: this.phase,
-				millToRemove: this.millToRemove,
-				hasPiece: !!cell.piece
-			});
-			return null;
+	private clearSelection() {
+		if (this.selectedPiece || this.selectedCell || this.validMoves.length > 0) {
+			this._selectionVersion++;
 		}
-
-		if (!this.removablePieces.includes(cell.piece)) {
-			console.log('Piece not removable:', {
-				pieceId: cell.piece.id,
-				playerName: cell.piece.player.name,
-				removablePiecesCount: this.removablePieces.length,
-				removablePieceIds: this.removablePieces.map((p) => p.id)
-			});
-			return null;
-		}
-
-		const removedPieceId = cell.piece.id;
-		this.board.removePiece(cell.piece);
-
-		const move: GameMove = {
-			action: GameAction.RemovePiece,
-			playerId: this.currentPlayer.id,
-			toCellId: cell.id,
-			removedPieceId: removedPieceId
-		};
-
-		this.millToRemove = false;
-		this.removablePieces = Object.freeze([]);
-
-		// Check win condition
-		if (this.checkWinCondition()) {
-			this.phase = GamePhase.GameOver;
-			this.winner = this.currentPlayer;
-		} else {
-			// Return to previous phase after capture
-			if (this.players.every((p) => p.unplacedPieces.length === 0)) {
-				this.phase = GamePhase.Movement;
-			} else {
-				this.phase = GamePhase.Placement;
-			}
-			this.nextTurn();
-		}
-
-		return move;
-	}
-
-	private handleCaptureClick(cell: Cell): GameMove | null {
-		if (!this.canRemovePiece() || !cell.piece) {
-			console.log('Capture blocked:', {
-				canRemove: this.canRemovePiece(),
-				hasPiece: !!cell.piece,
-				phase: this.phase,
-				millToRemove: this.millToRemove,
-				isMyTurn: this.isMyTurn()
-			});
-			return null;
-		}
-
-		if (!this.removablePieces.includes(cell.piece)) {
-			console.log('Piece not removable:', {
-				pieceId: cell.piece.id,
-				playerName: cell.piece.player.name,
-				removablePiecesCount: this.removablePieces.length,
-				removablePieceIds: this.removablePieces.map((p) => p.id)
-			});
-			return null;
-		}
-
-		const removedPieceId = cell.piece.id;
-		this.board.removePiece(cell.piece);
-
-		const move: GameMove = {
-			action: GameAction.RemovePiece,
-			playerId: this.currentPlayer.id,
-			toCellId: cell.id,
-			removedPieceId: removedPieceId
-		};
-
-		this.millToRemove = false;
-		this.removablePieces = Object.freeze([]);
-
-		// Check win condition
-		if (this.checkWinCondition()) {
-			this.phase = GamePhase.GameOver;
-			this.winner = this.currentPlayer;
-		} else {
-			// Return to previous phase after capture
-			if (this.players.every((p) => p.unplacedPieces.length === 0)) {
-				this.phase = GamePhase.Movement;
-			} else {
-				this.phase = GamePhase.Placement;
-			}
-			this.nextTurn();
-		}
-
-		return move;
-	}
-
-	private nextTurn(): void {
-		// Switch players
-		this.currentPlayer = this.getOpponent(this.currentPlayer);
-		this.turn.value = this.turn.valueOf() + 1;
-
-		// Check if placement phase is over
-		if (this.phase === GamePhase.Placement) {
-			this.phase = GameRules.getNextPhase(this.phase, this.players);
-		}
-
-		// Reset UI state
 		this.selectedPiece = null;
 		this.selectedCell = null;
 		this.validMoves = Object.freeze([]);
 	}
 
-	private checkWinCondition(): boolean {
-		const opponent = this.getOpponent(this.currentPlayer);
-		return GameRules.hasPlayerWon(this.currentPlayer, opponent, this.phase, this.board);
+	/** Places the player's next piece on the cell, if that is a legal move */
+	private tryPlace(player: Player, cell: Cell): GameMove | null {
+		if (this.phase !== GamePhase.Placement || player !== this.currentPlayer || cell.piece) {
+			return null;
+		}
+		const piece = player.nextPiece;
+		if (!piece) return null;
+
+		this.board.placePiece(piece, cell);
+		const move: GameMove = {
+			action: GameAction.PlacePiece,
+			playerId: player.id,
+			pieceId: piece.id,
+			toCellId: cell.id
+		};
+		this.afterPieceLanded(player, cell);
+		return move;
 	}
 
-	// Additional getter for turn access
-	get getTurn(): SubscribableNum {
-		return this.turn;
+	/** Moves (or flies) the player's piece between cells, if that is a legal move */
+	private tryMove(player: Player, fromCell: Cell, toCell: Cell): GameMove | null {
+		if (this.phase !== GamePhase.Movement || player !== this.currentPlayer) return null;
+		const piece = fromCell.piece;
+		if (!piece || piece.player !== player || toCell.piece) return null;
+		if (!GameRules.getValidMovesForPiece(piece, this.board).includes(toCell)) return null;
+
+		if (GameRules.canPlayerFly(player)) {
+			this.board.flyPiece(piece, toCell);
+		} else {
+			this.board.movePiece(piece, toCell);
+		}
+		const move: GameMove = {
+			action: GameAction.MovePiece,
+			playerId: player.id,
+			pieceId: piece.id,
+			fromCellId: fromCell.id,
+			toCellId: toCell.id
+		};
+		this.afterPieceLanded(player, toCell);
+		return move;
 	}
 
-	// Apply a move received from peer
-	applyMove(move: GameMove): boolean {
+	/** Removes an opponent's piece after a mill, if that is a legal removal */
+	private tryRemove(player: Player, cell: Cell): GameMove | null {
+		if (this.phase !== GamePhase.Capture || !this.millToRemove || player !== this.currentPlayer) {
+			return null;
+		}
+		const piece = cell.piece;
+		if (!piece || piece.player === player || !this.removablePieces.includes(piece)) {
+			return null;
+		}
+
+		this.board.removePiece(piece);
+		const move: GameMove = {
+			action: GameAction.RemovePiece,
+			playerId: player.id,
+			toCellId: cell.id,
+			removedPieceId: piece.id
+		};
+		this.millToRemove = false;
+		this.removablePieces = Object.freeze([]);
+
+		const opponent = this.getOpponent(player);
+		if (GameRules.hasPlayerWon(player, opponent, GamePhase.Capture, this.board)) {
+			this.endGame(player);
+		} else {
+			this.endTurn();
+		}
+		return move;
+	}
+
+	/** After a place or move: enter capture if a mill formed, otherwise end the turn */
+	private afterPieceLanded(player: Player, cell: Cell) {
+		this.clearSelection();
+		if (this.board.checkForMill(cell)) {
+			const removable = this.getRemovablePieces(player);
+			if (removable.length > 0) {
+				this.millToRemove = true;
+				this.removablePieces = removable;
+				this.phase = GamePhase.Capture;
+				this.notifyChange();
+				return;
+			}
+		}
+		this.endTurn();
+	}
+
+	private endTurn(): void {
+		const mover = this.currentPlayer;
+		const next = this.getOpponent(mover);
+
+		// update all state before notifying anyone
+		this.phase = this.players.every((p) => p.unplacedPieces.length === 0)
+			? GamePhase.Movement
+			: GamePhase.Placement;
+		this.currentPlayer = next;
+		this.clearSelection();
+
+		// the next player loses if they have too few pieces or cannot move
+		if (
+			this.phase === GamePhase.Movement &&
+			GameRules.hasPlayerWon(mover, next, GamePhase.Movement, this.board)
+		) {
+			this.endGame(mover);
+			return;
+		}
+
+		this.turn.value = this.turn.valueOf() + 1;
+		this.notifyChange();
+	}
+
+	private endGame(winner: Player) {
+		this.phase = GamePhase.GameOver;
+		this.winner = winner;
+		this.millToRemove = false;
+		this.removablePieces = Object.freeze([]);
+		this.clearSelection();
+		this.turn.value = this.turn.valueOf() + 1;
+		this.notifyChange();
+	}
+
+	/** Ends the game with the given player forfeiting */
+	forfeit(playerId: string): void {
+		const loser = this.players.find((p) => p.id === playerId);
+		if (!loser || this.phase === GamePhase.GameOver) return;
+		this.endGame(this.getOpponent(loser));
+	}
+
+	/**
+	 * Applies a move received from the remote peer. The move is treated as untrusted:
+	 * it must be well-formed, made by the player whose turn it is (never the local
+	 * player), and legal under the same rules as a local click.
+	 */
+	applyMove(move: unknown): boolean {
 		try {
-			console.log('Applying move from peer:', move);
+			if (!move || typeof move !== 'object') return false;
+			const m = move as Record<string, unknown>;
+			if (typeof m.playerId !== 'string') return false;
 
-			// Temporarily set to ready to avoid "Game not ready" errors
-			const wasReady = this.ready;
-			this.ready = true;
+			const player = this.players.find((p) => p.id === m.playerId);
+			if (!player || player !== this.currentPlayer) return false;
+			if (this.localPlayerId !== null && player.id === this.localPlayerId) return false;
+			if (!isCellId(m.toCellId, this.board)) return false;
+			const toCell = this.board.getCell(m.toCellId);
 
-			const result = (() => {
-				switch (move.action) {
-					case GameAction.PlacePiece:
-						return this.applyPlaceMove(move);
-					case GameAction.MovePiece:
-						return this.applyMovePieceMove(move);
-					case GameAction.RemovePiece:
-						return this.applyRemoveMove(move);
-					default:
-						console.error('Unknown move action:', move.action);
-						return false;
+			switch (m.action) {
+				case GameAction.PlacePiece:
+					if (player.nextPiece?.id !== m.pieceId) return false;
+					return this.tryPlace(player, toCell) !== null;
+				case GameAction.MovePiece: {
+					if (!isCellId(m.fromCellId, this.board)) return false;
+					const fromCell = this.board.getCell(m.fromCellId);
+					if (fromCell.piece?.id !== m.pieceId) return false;
+					return this.tryMove(player, fromCell, toCell) !== null;
 				}
-			})();
-
-			// Restore ready state
-			this.ready = wasReady;
-			return result;
+				case GameAction.RemovePiece:
+					if (toCell.piece?.id !== m.removedPieceId) return false;
+					return this.tryRemove(player, toCell) !== null;
+				default:
+					return false;
+			}
 		} catch (error) {
 			console.error('Error applying move:', error);
 			return false;
 		}
-	}
-
-	private applyPlaceMove(move: GameMove): boolean {
-		if (!move.toCellId && move.toCellId !== 0) return false;
-
-		const cell = this.board.getCell(move.toCellId);
-		const player = this.players.find((p) => p.id === move.playerId);
-
-		if (!cell || !player || cell.piece) {
-			console.log('Apply move failed:', {
-				cellExists: !!cell,
-				playerExists: !!player,
-				cellOccupied: !!cell?.piece,
-				moveData: move
-			});
-			return false;
-		}
-
-		const piece = player.nextPiece;
-		if (!piece || piece.id !== move.pieceId) {
-			console.log('Piece validation failed:', {
-				pieceExists: !!piece,
-				expectedPieceId: move.pieceId,
-				actualPieceId: piece?.id
-			});
-			return false;
-		}
-
-		// Apply the move
-		this.board.placePiece(piece, cell);
-
-		// Check for mill and update game state
-		if (this.board.checkForMill(cell)) {
-			this.millToRemove = true;
-			this.removablePieces = Object.freeze(this.getRemovablePieces(player));
-			this.phase = GamePhase.Capture;
-		} else {
-			// Update current player and trigger reactive updates
-			this.currentPlayer = this.getOpponent(player);
-
-			// Update turn counter normally
-			this.turn.value = this.turn.valueOf() + 1;
-
-			// Check if placement phase is over
-			if (this.phase === GamePhase.Placement) {
-				this.phase = GameRules.getNextPhase(this.phase, this.players);
-			}
-
-			// Reset UI state
-			this.selectedPiece = null;
-			this.validMoves = Object.freeze([]);
-		}
-
-		return true;
-	}
-
-	private applyMovePieceMove(move: GameMove): boolean {
-		if (!move.fromCellId && move.fromCellId !== 0) return false;
-		if (!move.toCellId && move.toCellId !== 0) return false;
-
-		const fromCell = this.board.getCell(move.fromCellId);
-		const toCell = this.board.getCell(move.toCellId);
-		const player = this.players.find((p) => p.id === move.playerId);
-
-		if (!fromCell || !toCell || !player || !fromCell.piece || toCell.piece) return false;
-		if (fromCell.piece.id !== move.pieceId) return false;
-
-		// Apply the move - use flying if player has <= 3 pieces
-		try {
-			if (player.pieceCount <= 3) {
-				this.board.flyPiece(fromCell.piece, toCell);
-			} else {
-				this.board.movePiece(fromCell.piece, toCell);
-			}
-		} catch (error) {
-			console.error('Error applying move piece:', error);
-			return false;
-		}
-
-		// Check for mill and update game state
-		if (this.board.checkForMill(toCell)) {
-			this.millToRemove = true;
-			this.removablePieces = Object.freeze(this.getRemovablePieces(player));
-			this.phase = GamePhase.Capture;
-		} else {
-			// Update current player and trigger reactive updates
-			this.currentPlayer = this.getOpponent(player);
-			this.turn.value = this.turn.valueOf() + 1;
-
-			// Reset UI state
-			this.selectedPiece = null;
-			this.selectedCell = null;
-			this.validMoves = Object.freeze([]);
-		}
-
-		return true;
-	}
-
-	private applyRemoveMove(move: GameMove): boolean {
-		if (!move.toCellId && move.toCellId !== 0) return false;
-
-		const cell = this.board.getCell(move.toCellId);
-		if (!cell || !cell.piece) return false;
-		if (cell.piece.id !== move.removedPieceId) return false;
-
-		// Apply the remove
-		this.board.removePiece(cell.piece);
-
-		// Reset capture phase
-		this.millToRemove = false;
-		this.removablePieces = Object.freeze([]);
-
-		// Check win condition
-		if (this.checkWinCondition()) {
-			this.phase = GamePhase.GameOver;
-			this.winner = this.currentPlayer;
-		} else {
-			// Return to previous phase after capture
-			if (this.players.every((p) => p.unplacedPieces.length === 0)) {
-				this.phase = GamePhase.Movement;
-			} else {
-				this.phase = GamePhase.Placement;
-			}
-
-			// Update current player and trigger reactive updates
-			this.currentPlayer = this.getOpponent(this.players.find((p) => p.id === move.playerId)!);
-			this.turn.value = this.turn.valueOf() + 1;
-
-			// Reset UI state
-			this.selectedPiece = null;
-			this.validMoves = Object.freeze([]);
-		}
-
-		return true;
 	}
 }

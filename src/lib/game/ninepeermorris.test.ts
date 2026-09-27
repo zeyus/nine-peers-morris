@@ -1,8 +1,11 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { NinePeersMorris, Player, GamePhase, GameAction } from './game';
-import { createMockWindow, setupHashableMock } from './test-utils';
+import { createMockWindow } from './test-utils';
 
-setupHashableMock();
+vi.mock('./hashable', () => ({
+	getHash: vi.fn().mockResolvedValue('mock-hash'),
+	getUUID: vi.fn().mockReturnValue('mock-uuid')
+}));
 
 describe('NinePeersMorris', () => {
 	let game: NinePeersMorris;
@@ -216,13 +219,13 @@ describe('NinePeersMorris', () => {
 
 						// If we hit a capture phase, we need to remove a piece
 						// don't snapshot phase here — re-check game.phase after handleCellClick since it may change
-                        // @ts-expect-error(game.phase may change after handleCellClick)
-                        if (game.phase === GamePhase.Capture && game.removablePieces.length > 0) {
-                            const opponentPiece = game.removablePieces[0];
-                            if (opponentPiece.cell) {
-                                game.handleCellClick(opponentPiece.cell);
-						    }
-                        }
+						// @ts-expect-error(game.phase may change after handleCellClick)
+						if (game.phase === GamePhase.Capture && game.removablePieces.length > 0) {
+							const opponentPiece = game.removablePieces[0];
+							if (opponentPiece.cell) {
+								game.handleCellClick(opponentPiece.cell);
+							}
+						}
 					}
 				}
 			}

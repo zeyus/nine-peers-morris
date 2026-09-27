@@ -1,30 +1,34 @@
 <script lang="ts">
-    import { type GamePiece } from "$lib/game/game";
-    let { piece, isSelected = false, isRemovable = false }: { 
-        piece: GamePiece,
-        isSelected?: boolean,
-        isRemovable?: boolean
-    } = $props();
+	import { type GamePiece } from '$lib/game/game';
+	let {
+		piece,
+		isSelected = false,
+		isRemovable = false
+	}: {
+		piece: GamePiece;
+		isSelected?: boolean;
+		isRemovable?: boolean;
+	} = $props();
 </script>
+
 <!-- animation class maybe for pieces: motion-safe:animate-[ping_5s_ease-in-out_infinite] -->
 <div
-    class="rounded-full size-1/2 mt-2 ml-2 z-10 border-[0.35vw] piece bg-radial-[at_60%_60%] to-80% transition-all duration-200"
-    class:from-purple-300={piece.player.name === "X"}
-    class:via-indigo-500={piece.player.name === "X"}
-    class:to-purple-900={piece.player.name === "X"}
-    class:from-amber-300={piece.player.name === "O"}
-    class:via-orange-500={piece.player.name === "O"}
-    class:to-amber-900={piece.player.name === "O"}
-    class:border-gray-300={!isSelected && !isRemovable}
-    class:border-yellow-400={isSelected}
-    class:border-red-500={isRemovable}
-    class:ring-4={isSelected || isRemovable}
-    class:ring-yellow-300={isSelected}
-    class:ring-red-400={isRemovable}
-    class:motion-safe:animate-pulse={isSelected}
-    class:motion-safe:animate-bounce={isRemovable}
-    class:shadow-lg={isSelected}
-    class:shadow-yellow-400={isSelected}
-    class:scale-110={isSelected}
-    >
-</div>
+	class="piece z-10 mt-2 ml-2 size-1/2 rounded-full border-[0.35vw] bg-radial-[at_60%_60%] to-80% transition-all duration-200"
+	class:from-purple-300={piece.player.name === 'X'}
+	class:via-indigo-500={piece.player.name === 'X'}
+	class:to-purple-900={piece.player.name === 'X'}
+	class:from-amber-300={piece.player.name === 'O'}
+	class:via-orange-500={piece.player.name === 'O'}
+	class:to-amber-900={piece.player.name === 'O'}
+	class:border-gray-300={!isSelected && !isRemovable}
+	class:border-yellow-400={isSelected}
+	class:border-red-500={isRemovable}
+	class:ring-4={isSelected || isRemovable}
+	class:ring-yellow-300={isSelected}
+	class:ring-red-400={isRemovable}
+	class:motion-safe:animate-pulse={isSelected}
+	class:motion-safe:animate-bounce={isRemovable}
+	class:shadow-lg={isSelected}
+	class:shadow-yellow-400={isSelected}
+	class:scale-110={isSelected}
+></div>

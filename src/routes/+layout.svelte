@@ -25,7 +25,12 @@
 			if (metaTag) metaTag.setAttribute('content', 'light');
 		}
 
-		console.log('AFTER applying theme - classList:', html.classList.toString(), 'hasDarkClass:', html.classList.contains('dark'));
+		console.log(
+			'AFTER applying theme - classList:',
+			html.classList.toString(),
+			'hasDarkClass:',
+			html.classList.contains('dark')
+		);
 	});
 
 	// Apply theme to document element whenever effectiveTheme changes
@@ -50,7 +55,9 @@
 	});
 </script>
 
-<div class="relative min-h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors">
+<div
+	class="relative min-h-screen bg-white text-gray-900 transition-colors dark:bg-gray-900 dark:text-gray-100"
+>
 	<div class="fixed top-4 right-4 z-50">
 		<ThemeToggle />
 	</div>

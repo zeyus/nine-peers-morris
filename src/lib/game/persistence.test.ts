@@ -1,8 +1,11 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Player, NinePeersMorris, GamePhase } from './game';
-import { createMockWindow, setupHashableMock } from './test-utils';
+import { createMockWindow } from './test-utils';
 
-setupHashableMock();
+vi.mock('./hashable', () => ({
+	getHash: vi.fn().mockResolvedValue('mock-hash'),
+	getUUID: vi.fn().mockReturnValue('mock-uuid')
+}));
 
 describe('Game State Persistence', () => {
 	let mockWindow: Window;

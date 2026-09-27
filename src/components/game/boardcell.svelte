@@ -1,99 +1,109 @@
 <script lang="ts">
-    import { type Cell, type NinePeersMorris } from "$lib/game/game";
-    import Piece from "./piece.svelte";
-    import { gameSession } from "$lib/game-state-store";
-    
-    let { cell, game, onclick }: {
-        cell?: Cell, // the cell object, which references a piece if placed
-        game?: NinePeersMorris,
-        onclick?: (cell: Cell) => void
-    } = $props();
+	import { GamePhase, type Cell, type NinePeersMorris } from '$lib/game/game';
+	import Piece from './piece.svelte';
 
-    function handleClick() {
-        if (cell && onclick) {
-            onclick(cell);
-        }
-    }
+	let {
+		cell,
+		game,
+		onclick,
+		version = 0
+	}: {
+		cell?: Cell; // the cell object, which references a piece if placed
+		game?: NinePeersMorris;
+		onclick?: (cell: Cell) => void;
+		version?: number; // bumped by the page whenever the game state changes
+	} = $props();
 
-    // Check if it's actually the local player's turn in multiplayer
-    const isMyTurnInMultiplayer = $derived.by(() => {
-        if (!game) return false;
+	function handleClick() {
+		if (cell && onclick) {
+			onclick(cell);
+		}
+	}
 
-        const session = $gameSession;
-        if (!session.isConnected || !session.peerState) {
-            return true; // In demo mode, always allow interaction
-        }
-
-        // Use the same approach as the page - check role against current player name
-        // This seems to be more reliable than checking player IDs
-        const currentPlayer = game.getCurrentPlayer;
-        if (!currentPlayer) return false;
-
-        const isMyTurn = (session.peerState.role === 0 && currentPlayer.name === "X") ||
-                        (session.peerState.role === 1 && currentPlayer.name === "O");
-
-        return isMyTurn;
-    });
-
-    const canPlayerMove = $derived(Boolean(game && game.phase === 'movement' && game.canMovePiece()));
-
-    // Force reactivity by accessing selectionVersion
-    const selectionVersion = $derived(game?.selectionVersion ?? 0);
-
-    const isValidMove = $derived(Boolean(game && cell && game.validMoves.includes(cell) && isMyTurnInMultiplayer && selectionVersion >= 0));
-    const isRemovable = $derived(Boolean(game && cell?.piece && game.removablePieces.includes(cell.piece) && isMyTurnInMultiplayer && selectionVersion >= 0));
-    const isSelected = $derived(Boolean(game && cell?.piece && game.selectedPiece === cell.piece && selectionVersion >= 0));
-    const isValidPlacement = $derived(Boolean(game && cell && !cell.piece && game.phase === 'placement' && game.canPlacePiece() && isMyTurnInMultiplayer && selectionVersion >= 0));
-    const isMovablePiece = $derived(Boolean(game && cell?.piece && game.phase === 'movement' && cell.piece.player.id === game.getCurrentPlayer?.id && canPlayerMove && isMyTurnInMultiplayer && selectionVersion >= 0));
-    
+	// The game object is mutated in place, so every derived value reads `version`
+	// to be recomputed when the game changes.
+	const state = $derived.by(() => {
+		void version;
+		if (!game || !cell) {
+			return {
+				isValidMove: false,
+				isRemovable: false,
+				isSelected: false,
+				isValidPlacement: false,
+				isMovablePiece: false
+			};
+		}
+		const myTurn = game.isMyTurn();
+		const piece = cell.piece;
+		return {
+			isValidMove: myTurn && game.validMoves.includes(cell),
+			isRemovable:
+				myTurn &&
+				!!piece &&
+				game.phase === GamePhase.Capture &&
+				game.removablePieces.includes(piece),
+			isSelected: !!piece && game.selectedPiece === piece,
+			isValidPlacement: !piece && game.canPlacePiece(),
+			isMovablePiece: !!piece && game.canMovePiece() && piece.player === game.getCurrentPlayer
+		};
+	});
+	const isHighlighted = $derived(state.isValidMove || state.isValidPlacement);
+	const isPlain = $derived(!isHighlighted && !state.isRemovable && !state.isMovablePiece);
+	const showMovable = $derived(state.isMovablePiece && !state.isSelected);
+	const piece = $derived.by(() => {
+		void version;
+		return cell?.piece ?? null;
+	});
 </script>
+
 {#if cell}
-    <div 
-        class="size-full z-10 grid place-items-center cursor-pointer relative" 
-        class:placed={cell.piece}
-        onclick={handleClick}
-        onkeydown={(e) => e.key === 'Enter' && handleClick()}
-        role="button"
-        tabindex="0"
-    >
-        {#if cell.piece}
-            <Piece 
-                piece={cell.piece} 
-                {isSelected}
-                {isRemovable}
-            />
-{/if}
-        
-        <!-- Cell indicator dot -->
-        <div
-            class="absolute top-50% mt-[1vw] ml-[1vw] rounded-full size-[2vw] z-5 border-[0.5vw] transition-all duration-200"
-            class:bg-purple-900={!isValidMove && !isRemovable && !isValidPlacement && !isMovablePiece}
-            class:border-pink-400={!isValidMove && !isRemovable && !isValidPlacement && !isMovablePiece}
-            class:bg-green-400={isValidMove || isValidPlacement}
-            class:border-green-200={isValidMove || isValidPlacement}
-            class:motion-safe:animate-pulse={isValidMove || isValidPlacement}
-            class:shadow-lg={isValidMove || isValidPlacement}
-            class:shadow-green-400={isValidMove || isValidPlacement}
-            class:scale-125={isValidMove || isValidPlacement}
-            class:bg-yellow-400={isMovablePiece && canPlayerMove && !isSelected}
-            class:border-yellow-200={isMovablePiece && canPlayerMove && !isSelected}
-            class:motion-safe:animate-bounce={isMovablePiece && canPlayerMove && !isSelected}
-            class:shadow-md={isMovablePiece && canPlayerMove}
-            class:shadow-yellow-300={isMovablePiece && canPlayerMove}
-            class:bg-red-500={isRemovable}
-            class:border-red-300={isRemovable}
-            class:motion-safe:animate-ping={isRemovable}
-            class:ring-4={isSelected}
-            class:ring-yellow-400={isSelected}
-            class:ring-opacity-70={isSelected}
-        ></div>
-        
-        {#if isRemovable}
-            <!-- Extra visual indicator for removable pieces -->
-            <div class="absolute inset-0 bg-red-500 opacity-20 animate-pulse rounded-full"></div>
-            <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-white font-bold text-lg pointer-events-none">
-                ✕
-            </div>
-        {/if}
-    </div>
+	<div
+		class="relative z-10 grid size-full cursor-pointer place-items-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+		class:placed={piece}
+		onclick={handleClick}
+		onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), handleClick())}
+		role="button"
+		tabindex="0"
+		aria-label={`Point ${cell.id}${piece ? `, ${piece.player.name} piece` : ', empty'}`}
+	>
+		{#if piece}
+			<Piece {piece} isSelected={state.isSelected} isRemovable={state.isRemovable} />
+		{/if}
+
+		<!-- Cell indicator dot -->
+		<div
+			class="pointer-events-none absolute z-5 mt-[1vw] ml-[1vw] size-[2vw] rounded-full border-[0.5vw] transition-all duration-200"
+			class:bg-purple-900={isPlain}
+			class:border-pink-400={isPlain}
+			class:bg-green-400={isHighlighted}
+			class:border-green-200={isHighlighted}
+			class:motion-safe:animate-pulse={isHighlighted}
+			class:shadow-lg={isHighlighted}
+			class:shadow-green-400={isHighlighted}
+			class:scale-125={isHighlighted}
+			class:bg-yellow-400={showMovable}
+			class:border-yellow-200={showMovable}
+			class:motion-safe:animate-bounce={showMovable}
+			class:shadow-md={state.isMovablePiece}
+			class:shadow-yellow-300={state.isMovablePiece}
+			class:bg-red-500={state.isRemovable}
+			class:border-red-300={state.isRemovable}
+			class:motion-safe:animate-ping={state.isRemovable}
+			class:ring-4={state.isSelected}
+			class:ring-yellow-400={state.isSelected}
+			class:ring-opacity-70={state.isSelected}
+		></div>
+
+		{#if state.isRemovable}
+			<!-- Extra visual indicator for removable pieces -->
+			<div
+				class="pointer-events-none absolute inset-0 animate-pulse rounded-full bg-red-500 opacity-20"
+			></div>
+			<div
+				class="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 transform text-lg font-bold text-white"
+			>
+				✕
+			</div>
+		{/if}
+	</div>
 {/if}
