@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { themePreference, type Theme } from '$lib/theme-store';
+	import { themePreference, type Theme } from '#lib/theme-store.js';
 	import { SunSolid, MoonSolid } from 'flowbite-svelte-icons';
 
 	function cycleTheme() {

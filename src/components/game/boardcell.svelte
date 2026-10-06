@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { GamePhase, type Cell, type NinePeersMorris } from '$lib/game/game';
+	import { GamePhase, type Cell, type NinePeersMorris } from '#lib/game/game.js';
 	import Piece from './piece.svelte';
 
 	let {

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Cell, NinePeersMorris } from '$lib/game/game';
+	import type { Cell, NinePeersMorris } from '#lib/game/game.js';
 	import BoardCell from './boardcell.svelte';
 	let {
 		n,

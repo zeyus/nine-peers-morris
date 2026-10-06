@@ -1,7 +1,7 @@
 <script lang="ts">
 	import '../app.css';
-	import { effectiveTheme } from '$lib/theme-store';
-	import { browser } from '$app/environment';
+	import { effectiveTheme } from '#lib/theme-store.js';
+	import { browser } from '$app/env';
 	import { onMount } from 'svelte';
 	import ThemeToggle from '../components/theme-toggle.svelte';
 

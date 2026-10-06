@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { type GamePiece } from '$lib/game/game';
+	import { type GamePiece } from '#lib/game/game.js';
 	let {
 		piece,
 		isSelected = false,

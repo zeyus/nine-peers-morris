@@ -1,6 +1,6 @@
 <script lang="ts">
 	import BoardSegment from './boardsegment.svelte';
-	import { type NineBoard, type Cell, type NinePeersMorris } from '$lib/game/game';
+	import { type NineBoard, type Cell, type NinePeersMorris } from '#lib/game/game.js';
 	let {
 		board,
 		game,

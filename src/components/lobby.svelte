@@ -2,10 +2,10 @@
 	import type { Peer } from '../thirdparty/peerjs/peer';
 	import { type DataConnection } from '../thirdparty/peerjs/dataconnection/DataConnection';
 	import { util } from '../thirdparty/peerjs/util';
-	import { randomName } from '$lib/utils';
+	import { randomName } from '#lib/utils.js';
 	import { onMount, onDestroy } from 'svelte';
 	import { get } from 'svelte/store';
-	import { peerConfig } from '$lib/persisted-store';
+	import { peerConfig } from '#lib/persisted-store.js';
 	import { Spinner, Modal, Button, ButtonGroup, Alert } from 'flowbite-svelte';
 	import PeerList from '../components/peer-list.svelte';
 	import {
@@ -14,11 +14,15 @@
 		GameClient,
 		type PeerMessage,
 		type PeerState
-	} from '$lib/game/comms';
-	import { attachConnection, getOrCreatePeer, setNewConnectionHandler } from '$lib/game/connection';
+	} from '#lib/game/comms.js';
+	import {
+		attachConnection,
+		getOrCreatePeer,
+		setNewConnectionHandler
+	} from '#lib/game/connection.js';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { gameSession, gameSessionActions, persistedSessionData } from '$lib/game-state-store';
+	import { gameSession, gameSessionActions, persistedSessionData } from '#lib/game-state-store.js';
 
 	const SESSION_EXPIRY = 5 * 60 * 1000; // 5 minutes
 
@@ -104,7 +108,7 @@
 			const age = Date.now() - persisted.timestamp;
 			if (age < SESSION_EXPIRY) {
 				// Navigate to board, which will handle restoration
-				goto(resolve('/board'));
+				goto(resolve('board'));
 				return;
 			} else {
 				// Session expired, clear it
@@ -162,7 +166,7 @@
 					invited = true;
 					send(c, PeerCommands.PlayWithMe);
 				} else if (msg.command === PeerCommands.LetsPlay && invited) {
-					goto(resolve('/board'));
+					goto(resolve('board'));
 				} else if (msg.command === PeerCommands.NoThanks) {
 					resetConnection(`${pId} declined your invitation.`);
 				}
@@ -176,7 +180,7 @@
 	function acceptInvite() {
 		if (dataConnection) send(dataConnection, PeerCommands.LetsPlay);
 		modalVisible = false;
-		goto(resolve('/board'));
+		goto(resolve('board'));
 	}
 
 	function declineInvite() {
@@ -201,6 +205,7 @@
 				<div class="mb-6 rounded-lg bg-gray-50 p-4 dark:bg-gray-700">
 					<div class="flex items-center justify-center space-x-2">
 						<span class="text-sm font-medium text-gray-500 dark:text-gray-400">Your Peer ID:</span>
+
 						<span
 							class="rounded border border-gray-200 bg-white px-3 py-1 font-mono text-lg font-semibold text-indigo-600 dark:border-gray-600 dark:bg-gray-800 dark:text-indigo-400"
 						>
@@ -210,9 +215,9 @@
 				</div>
 
 				{#if notice}
-					<Alert color="yellow" class="mb-6" dismissable onclose={() => (notice = null)}>
-						{notice}
-					</Alert>
+					<Alert color="yellow" class="mb-6" dismissable onclose={() => (notice = null)}
+						>{notice}</Alert
+					>
 				{/if}
 
 				{#if them}
@@ -234,6 +239,7 @@
 						<span>Available Players</span>
 						<div class="h-2 w-2 animate-pulse rounded-full bg-green-500 dark:bg-green-400"></div>
 					</h2>
+
 					<PeerList pId={$peerConfig.pId} {onConnectRequest} />
 				</div>
 			</div>

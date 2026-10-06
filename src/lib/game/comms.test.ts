@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { PeerBroker, PeerData, GameHost, PeerRole, type PeerMessage } from './comms';
-import { peerConfig, type PersistedPeerConfig } from '$lib/persisted-store';
-import { getHash } from '$lib/game/hashable';
+import { peerConfig, type PersistedPeerConfig } from '#lib/persisted-store.js';
+import { getHash } from '#lib/game/hashable.js';
 
 const crypto = {
 	subtle: {
@@ -27,8 +27,8 @@ if (!globalThis.window.crypto) {
 
 vi.mock('../../thirdparty/peerjs/peer');
 vi.mock('../../thirdparty/peerjs/dataconnection/DataConnection');
-vi.mock('$lib/persisted-store');
-vi.mock('$lib/game/hashable');
+vi.mock('#lib/persisted-store.js');
+vi.mock('#lib/game/hashable.js');
 
 describe('Comms', () => {
 	const validHash = '7509e5bda0c762d2bac7f90d758b5b2263fa01ccbc542ab5e3df163be08e6ca9';

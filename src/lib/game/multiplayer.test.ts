@@ -10,7 +10,7 @@ import {
 import { GameAction, GamePhase, type NinePeersMorris } from './game';
 
 vi.mock('../../thirdparty/peerjs/peer');
-vi.mock('$lib/persisted-store');
+vi.mock('#lib/persisted-store.js');
 
 // Uses the real SHA-256 hashing (no hashable mock) so state hashes must really agree.
 beforeAll(() => {

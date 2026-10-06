@@ -1,9 +1,9 @@
 import { Peer } from '../../thirdparty/peerjs/peer';
 import { type DataConnection } from '../../thirdparty/peerjs/dataconnection/DataConnection';
 import { util } from '../../thirdparty/peerjs/util';
-import { peerServerConf } from '$lib/peer-config';
+import { peerServerConf } from '#lib/peer-config.js';
 import { get } from 'svelte/store';
-import { peerConfig, type PersistedPeerConfig } from '$lib/persisted-store';
+import { peerConfig, type PersistedPeerConfig } from '#lib/persisted-store.js';
 import { Player, NinePeersMorris, Game } from './game';
 import { getHash, getUUID } from './hashable';
 import type { Hydratable } from './hydratable';

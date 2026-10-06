@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { peerListPath } from '$lib/peer-config';
+	import { peerListPath } from '#lib/peer-config.js';
 	import Peer from './peer.svelte';
 
 	const REFRESH_INTERVAL = 10000;

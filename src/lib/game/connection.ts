@@ -1,8 +1,8 @@
 import { get } from 'svelte/store';
 import { Peer } from '../../thirdparty/peerjs/peer';
 import type { DataConnection } from '../../thirdparty/peerjs/dataconnection/DataConnection';
-import { peerServerConf } from '$lib/peer-config';
-import { gameSession, gameSessionActions } from '$lib/game-state-store';
+import { peerServerConf } from '#lib/peer-config.js';
+import { gameSession, gameSessionActions } from '#lib/game-state-store.js';
 import {
 	HashMismatchError,
 	PeerCommands,

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import NineGameBoard from '../../components/game/ninegameboard.svelte';
-	import { Player, NinePeersMorris, GamePhase, type Cell } from '$lib/game/game';
+	import { Player, NinePeersMorris, GamePhase, type Cell } from '#lib/game/game.js';
 	import { onMount, onDestroy } from 'svelte';
 	import { get } from 'svelte/store';
 	import {
@@ -8,17 +8,17 @@
 		gameSessionActions,
 		persistedSessionData,
 		type PersistedSessionData
-	} from '$lib/game-state-store';
+	} from '#lib/game-state-store.js';
 	import { goto } from '$app/navigation';
 	import { Modal, Button, Alert } from 'flowbite-svelte';
-	import { PeerState } from '$lib/game/comms';
+	import { PeerState } from '#lib/game/comms.js';
 	import {
 		attachConnection,
 		destroyPeer,
 		forfeitAndDisconnect,
 		getOrCreatePeer,
 		sendMove
-	} from '$lib/game/connection';
+	} from '#lib/game/connection.js';
 	import { resolve } from '$app/paths';
 
 	const SESSION_EXPIRY = 5 * 60 * 1000; // 5 minutes
